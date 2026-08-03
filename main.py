@@ -9,8 +9,15 @@ main.py
     python main.py --file chapter1.txt
 """
 import os
+
+# إيقاف تتبع الخدمة والذاكرة لتفادي التعارض مع ChromaDB و Python 3.14
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+
+import streamlit as st
+from crewai import Crew, Process, LLM
+# باقي الأسطر تاع الكود تاعك عادي جداً...
 
 import argparse
 from crewai import Crew, Process, LLM
