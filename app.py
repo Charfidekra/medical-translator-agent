@@ -10,8 +10,17 @@ app.py
 """
 
 import os
+
+# إيقاف تتبع الخدمة والذاكرة لتفادي التعارض مع ChromaDB و Python 3.14
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 import io
 import streamlit as st
+from crewai import Crew, Process, LLM
+# باقي الأسطر تاع الكود تاعك عادي جداً...
+
+
 
 from config import CHUNK_SIZE_WORDS
 from main import chunk_text, translate_chunk
