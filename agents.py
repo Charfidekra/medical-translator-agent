@@ -16,9 +16,9 @@ from prompts import (
 
 # إعداد الـ LLM المشترك بين كل الوكلاء (يمكن نبدلو نموذج مختلف لكل وكيل لاحقاً)
 llm = LLM(
-    model=f"anthropic/{MODEL_NAME}",
+    model="anthropic/claude-3-5-sonnet-20241022",
     api_key=ANTHROPIC_API_KEY,
-    temperature=0.2,  # قليلة باش تكون الترجمة ثابتة ومو مبدعة بزاف
+    temperature=0.2,
 )
 
 
