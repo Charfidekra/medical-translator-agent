@@ -1,0 +1,66 @@
+french_term,english_term,domain,notes
+insuffisance rénale aiguë,acute kidney injury,nephrology,IRA/AKI - previously called acute renal failure
+insuffisance rénale chronique,chronic kidney disease,nephrology,IRC/CKD
+débit de filtration glomérulaire,glomerular filtration rate,nephrology,GFR
+intoxication,poisoning,toxicology,false friend - not addiction
+accident vasculaire cérébral,stroke,neurology,AVC/CVA - cerebrovascular accident
+infarctus du myocarde,myocardial infarction,cardiology,heart attack
+insuffisance cardiaque,heart failure,cardiology,
+hypertension artérielle,arterial hypertension,cardiology,HTA/hypertension
+fibrillation auriculaire,atrial fibrillation,cardiology,
+embolie pulmonaire,pulmonary embolism,pulmonology,
+pneumopathie,pneumonia,pulmonology,context dependent - can also mean lung disease broadly
+bronchopneumopathie chronique obstructive,chronic obstructive pulmonary disease,pulmonology,BPCO/COPD
+diabète sucré,diabetes mellitus,endocrinology,
+hyperglycémie,hyperglycemia,endocrinology,
+hypoglycémie,hypoglycemia,endocrinology,
+thyroïdite,thyroiditis,endocrinology,
+anémie,anemia,hematology,
+leucocytose,leukocytosis,hematology,
+thrombocytopénie,thrombocytopenia,hematology,
+coagulation intravasculaire disséminée,disseminated intravascular coagulation,hematology,DIC
+septicémie,sepsis,infectious disease,false friend - not septicemia strictly
+choc septique,septic shock,infectious disease,
+méningite,meningitis,infectious disease,
+tuberculose,tuberculosis,infectious disease,
+gastro-entérite,gastroenteritis,gastroenterology,
+cirrhose,cirrhosis,hepatology,
+pancréatite,pancreatitis,gastroenterology,
+appendicite,appendicitis,surgery,
+péritonite,peritonitis,surgery,
+fracture,fracture,orthopedics,
+entorse,sprain,orthopedics,
+luxation,dislocation,orthopedics,
+arthrose,osteoarthritis,rheumatology,false friend - not arthrosis
+polyarthrite rhumatoïde,rheumatoid arthritis,rheumatology,
+lupus érythémateux disséminé,systemic lupus erythematosus,rheumatology,
+épilepsie,epilepsy,neurology,
+crise convulsive,seizure,neurology,
+sclérose en plaques,multiple sclerosis,neurology,
+maladie de Parkinson,Parkinson's disease,neurology,
+démence,dementia,neurology,
+dépression,depression,psychiatry,
+trouble bipolaire,bipolar disorder,psychiatry,
+schizophrénie,schizophrenia,psychiatry,
+grossesse,pregnancy,obstetrics,
+accouchement,delivery,obstetrics,
+prééclampsie,preeclampsia,obstetrics,
+foetus,fetus,obstetrics,
+nourrisson,infant,pediatrics,
+tension artérielle,blood pressure,general,
+fréquence cardiaque,heart rate,general,
+température corporelle,body temperature,general,
+antécédents médicaux,medical history,general,
+examen clinique,clinical examination,general,
+diagnostic différentiel,differential diagnosis,general,
+pronostic,prognosis,general,
+étiologie,etiology,general,
+symptôme,symptom,general,
+syndrome,syndrome,general,
+biopsie,biopsy,general,
+prélèvement sanguin,blood sample,general,
+posologie,dosage,pharmacology,
+effet secondaire,side effect,pharmacology,
+contre-indication,contraindication,pharmacology,
+voie orale,oral route,pharmacology,
+voie intraveineuse,intravenous route,pharmacology,
