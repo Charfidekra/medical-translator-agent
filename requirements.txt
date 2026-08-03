@@ -1,4 +1,5 @@
 streamlit
+setuptools
 crewai==0.83.0
 crewai-tools==0.14.0
 anthropic
