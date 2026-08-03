@@ -8,8 +8,10 @@ main.py
     python main.py --text "النص الفرنسي هنا"
     python main.py --file chapter1.txt
 """
-
 import os
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
+
 import argparse
 from crewai import Crew, Process, LLM
 from config import CHUNK_SIZE_WORDS
