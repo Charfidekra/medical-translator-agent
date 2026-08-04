@@ -2,9 +2,7 @@ streamlit
 setuptools
 crewai>=0.100.0
 crewai-tools
-groq
-langchain-groq
-anthropic
+openai
 pydantic>=2.0.0
 pydantic-settings
 python-dotenv
