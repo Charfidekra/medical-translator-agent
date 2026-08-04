@@ -39,18 +39,33 @@ st.set_page_config(page_title="المترجم الطبي - فرنسي ⇾ إنج
 # دوال مساعدة
 # ----------------------------------------------------------------------------
 
-def extract_text_from_upload(uploaded_file) -> str:
-    """يستخرج النص من ملف مرفوع (txt أو pdf)."""
-    if uploaded_file.name.lower().endswith(".pdf"):
-        import fitz  # PyMuPDF
+import pypdfium2 as pdfium
 
-        pdf_bytes = uploaded_file.read()
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        text = "\n".join(page.get_text() for page in doc)
-        doc.close()
-        return text
+
+def extract_text_from_file(uploaded_file) -> str:
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith(".pdf"):
+        # قراءة ملف الـ PDF باستخدام pypdfium2
+        pdf = pdfium.PdfDocument(uploaded_file)
+        extracted_text = []
+
+        for page in pdf:
+            textpage = page.get_textpage()
+            page_text = textpage.get_text_range()
+            if page_text and page_text.strip():
+                extracted_text.append(page_text)
+
+        full_text = "\n\n".join(extracted_text)
+
+        if not full_text.strip():
+            raise ValueError(
+                "لم يتم العثور على نص قابل للاستخراج. يرجى التأكد من أن الملف ليس صوراً/سكانر."
+            )
+
+        return full_text
     else:
-        return uploaded_file.read().decode("utf-8")
+        return uploaded_file.getvalue().decode("utf-8")
 
 
 def terminology_db_is_ready() -> bool:
