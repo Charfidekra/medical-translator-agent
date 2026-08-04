@@ -3,23 +3,17 @@ main.py
 -------
 نقطة الدخول للمشروع. تاخذ نص فرنسي (أو ملف)، تقسمه لقطع، وتشغل عليه
 الـ Crew (الوكلاء الثلاثة) قطعة بقطعة، ثم تجمع النتيجة في ملف نهائي.
-
-طريقة الاستعمال:
-    python main.py --text "النص الفرنسي هنا"
-    python main.py --file chapter1.txt
 """
 import os
+import sys
+import argparse
 
-# إيقاف تتبع الخدمة والذاكرة لتفادي التعارض مع ChromaDB و Python 3.14
+# إيقاف تتبع الخدمة والذاكرة لتفادي التعارض مع ChromaDB
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
 import streamlit as st
-from crewai import Crew, Process, LLM
-# باقي الأسطر تاع الكود تاعك عادي جداً...
-
-import argparse
 from crewai import Crew, Process, LLM
 from config import CHUNK_SIZE_WORDS
 from tasks import build_pipeline_tasks
@@ -28,11 +22,16 @@ from terminology_db import query_relevant_terms
 # -------------------------------------------------------------
 # 1️⃣ إعداد مفتاح API والنموذج (Groq - Llama 3.3)
 # -------------------------------------------------------------
-# يمكنك وضع مفتاح Groq الخاص بكِ هنا مباشرة أو في ملف .env
-os.environ["GROQ_API_KEY"] = "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"
-# تعريف نموذج الذكاء الاصطناعي المجاني والسريع جداً
+# جلب المفتاح بأمان من Streamlit Secrets أو البيئة المحلية
+GROQ_KEY = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+
+if GROQ_KEY:
+    os.environ["GROQ_API_KEY"] = GROQ_KEY
+
+# تعريف نموذج الذكاء الاصطناعي المجاني والسريع جداً عبر Groq
 groq_llm = LLM(
     model="groq/llama-3.3-70b-versatile",
+    api_key=GROQ_KEY,
     temperature=0.2
 )
 
@@ -74,7 +73,12 @@ def translate_document(source_text: str) -> str:
         print(f"\n[INFO] جاري ترجمة القطعة {idx}/{len(chunks)}...")
 
         # البحث في معجم المصطلحات عن الكلمات المهمة قبل التمرير للـ Crew
-        retrieved_terms = query_relevant_terms(chunk)
+        try:
+            retrieved_terms = query_relevant_terms(chunk)
+        except Exception as e:
+            print(f"[WARN] لم يتم التمكن من جلب المصطلحات: {e}")
+            retrieved_terms = "No specific terminology available."
+
         print(f"[INFO] مصطلحات مسترجعة من المعجم:\n{retrieved_terms}\n")
 
         translated = translate_chunk(chunk, retrieved_terms)
@@ -105,8 +109,3 @@ if __name__ == "__main__":
         print("[INFO] ما كاين لا --text ولا --file، نستعملو نص تجريبي.")
 
     final_text = translate_document(source)
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        f.write(final_text)
-
-    print(f"\n[DONE] النص المترجم النهائي محفوظ في: {args.output}")
