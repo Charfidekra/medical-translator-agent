@@ -30,25 +30,37 @@ def chunk_text(text: str, chunk_size_words: int = CHUNK_SIZE_WORDS):
 
 
 def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
-    """ترجمة قطعة واحدة باستخدام Groq"""
-    # 1️⃣ جلب المفتاح المباشر من Streamlit Secrets
+    """ترجمة قطعة واحدة باستعمال Groq عبر واجهة OpenAI المستقرة"""
+    
+    # 1️⃣ جلب المفتاح بأمان
     groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-
     if not groq_key:
-        st.error("❌ لم يتم العثور على مفتاح GROQ_API_KEY في Streamlit Secrets!")
-        raise ValueError("GROQ_API_KEY is missing!")
+        raise ValueError("GROQ_API_KEY is missing from Streamlit Secrets!")
 
-    # 2️⃣ إسناد المفتاح لكل متطلبات البيئة لتجاوز فحص CrewAI
-    os.environ["GROQ_API_KEY"] = str(groq_key).strip()
+    # 2️⃣ إسناد المفتاح لمتغيرات البيئة
+    os.environ["OPENAI_API_KEY"] = str(groq_key).strip()
 
-    # 3️⃣ تعريف الـ LLM مع تحديد المزود والنموذج بشكل صريح
+    # 3️⃣ استدعاء سيرفر Groq عبر واجهة OpenAI القياسية (تتجنب ImportError نهائياً)
     groq_llm = LLM(
-        model="groq/llama-3.3-70b-versatile",
+        model="openai/llama-3.3-70b-versatile",
+        base_url="https://api.groq.com/openai/v1",
         api_key=str(groq_key).strip(),
-        temperature=0.2,
+        temperature=0.2
     )
 
     tasks = build_pipeline_tasks(chunk, retrieved_terms)
+
+    for task in tasks:
+        task.agent.llm = groq_llm
+
+    crew = Crew(
+        agents=[t.agent for t in tasks],
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+    )
+    result = crew.kickoff()
+    return str(result)
 
     # 4️⃣ إسناد الـ LLM لكل الأجنتس في المهام
     for task in tasks:
