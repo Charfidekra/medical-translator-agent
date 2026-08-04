@@ -5,32 +5,31 @@ from main import translate_document
 
 
 def extract_text_from_pdf(uploaded_file) -> str:
-    """محاولة استخراج النص من الـ PDF بأكثر من طريقة"""
+    """استخراج النص من ملف الـ PDF بأكثر من طريقة مفضلة"""
     full_text = ""
 
     # المحاولة الأولى: عبر pdfplumber
     try:
         with pdfplumber.open(uploaded_file) as pdf:
-            pages_text = []
-            for page in pdf.pages:
-                t = page.extract_text(layout=True)
-                if t and t.strip():
-                    pages_text.append(t)
+            pages_text = [
+                p.extract_text(layout=True)
+                for p in pdf.pages
+                if p.extract_text(layout=True)
+            ]
             full_text = "\n\n".join(pages_text)
     except Exception:
         full_text = ""
 
-    # المحاولة الثانية: عبر pypdfium2 إذا فشلت الأولى
+    # المحاولة الثانية: عبر pypdfium2 في حال فشل الأولى
     if not full_text.strip():
         try:
             uploaded_file.seek(0)
             pdf = pdfium.PdfDocument(uploaded_file)
-            pages_text = []
-            for page in pdf:
-                textpage = page.get_textpage()
-                t = textpage.get_text_range()
-                if t and t.strip():
-                    pages_text.append(t)
+            pages_text = [
+                p.get_textpage().get_text_range()
+                for p in pdf
+                if p.get_textpage().get_text_range().strip()
+            ]
             full_text = "\n\n".join(pages_text)
         except Exception:
             full_text = ""
@@ -72,7 +71,7 @@ if option == "رفع ملف (PDF / TXT)":
             else:
                 st.error(
                     "❌ تعذر استخراج النص لأن ملف الـ PDF عبارة عن صور (Scanned PDF). "
-                    "يمكنك نسَخ النص من الملف ولصقه عبر خيار 'كتابة / نسخ النص مباشرة'."
+                    "يمكنك نسخ النص من الملف ولصقه عبر خيار 'كتابة / نسخ النص مباشرة'."
                 )
         else:
             source_text = uploaded_file.getvalue().decode("utf-8")
