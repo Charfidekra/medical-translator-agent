@@ -36,11 +36,17 @@ def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
     """
     ترجمة قطعة واحدة باستخدام نموذج Groq عبر واجهة OpenAI المستقرة.
     """
-    # جلب المفتاح بأمان من Streamlit Secrets أو البيئة
+    # جلب المفتاح بأمان من Secrets أو Environment
     groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
 
-    # استخدام واجهة OpenAI القياسية للتوجيه إلى سيرفرات Groq
-    # هذه الطريقة تتفادي خطأ ImportError الخاص بحزمة groq في CrewAI
+    # طباعة تنبيه في الـ Terminal للتأكد من وجود المفتاح بدون كشفه
+    if not groq_key:
+        raise ValueError("GROQ_API_KEY is missing! Check Streamlit Secrets.")
+
+    # إسناد المفتاح لمتغيرات البيئة للطرفين لضمان قرائته
+    os.environ["GROQ_API_KEY"] = groq_key
+    os.environ["OPENAI_API_KEY"] = groq_key
+
     groq_llm = LLM(
         model="openai/llama-3.3-70b-versatile",
         base_url="https://api.groq.com/openai/v1",
@@ -50,14 +56,13 @@ def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
 
     tasks = build_pipeline_tasks(chunk, retrieved_terms)
 
-    # ربط النموذج بكافة الوكلاء داخل المهام
     for task in tasks:
         task.agent.llm = groq_llm
 
     crew = Crew(
         agents=[t.agent for t in tasks],
         tasks=tasks,
-        process=Process.sequential,  # كل مهمة تلو الأخرى: ترجمة -> تدقيق -> تنقيح
+        process=Process.sequential,
         verbose=True,
     )
     result = crew.kickoff()
