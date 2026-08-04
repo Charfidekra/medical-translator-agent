@@ -1,62 +1,18 @@
-import base64
-import io
-import os
+import easyocr
+import numpy as np
 import pdfplumber
 import pypdfium2 as pdfium
 import streamlit as st
 from main import translate_document
-from openai import OpenAI
 from PIL import Image
 
-def ocr_image_with_groq(image: Image.Image, groq_key: str) -> str:
-    """استخراج النص من الصورة باستخدام نماذج Vision المعتمدة من Groq"""
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1", api_key=groq_key
-    )
+# تحميل قارئ EasyOCR وتخزينه في الـ Cache لضمان السرعة وتجنب إعادة التحميل مع كل إدخال
+@st.cache_resource
+def load_ocr_reader():
+    return easyocr.Reader(['fr', 'en'], gpu=False)
 
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG")
-    img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-    # قائمة بأحدث أسماء نماذج الرؤية المتاحة على Groq
-    vision_models = [
-        "llama-3.2-90b-vision-preview",
-        "llama-3.2-11b-vision-preview",
-        "llama-3.2-11b-vision-instruct",
-    ]
-
-    for model_name in vision_models:
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Extract all text from this image exactly as it is, maintaining sentence order. Do not translate, just extract the exact French text.",
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_b64}"
-                                },
-                            },
-                        ],
-                    }
-                ],
-                temperature=0.1,
-            )
-            return response.choices[0].message.content
-        except Exception:
-            continue
-
-    raise RuntimeError("تعذر الوصول إلى نموذج رؤية نشط في Groq API.")
-
-
-def extract_text_from_pdf(uploaded_file, groq_key: str) -> str:
-    """استخراج النص بالطريقة العادية، وإن تعذر يتم اللجوء للـ Vision OCR تلقائياً"""
+def extract_text_from_pdf(uploaded_file) -> str:
+    """استخراج النص بالطريقة النصية العادية، وإن تعذر يتم استخدام EasyOCR تلقائياً"""
     full_text = ""
 
     # المحاولة الأولى: pdfplumber
@@ -85,21 +41,26 @@ def extract_text_from_pdf(uploaded_file, groq_key: str) -> str:
         except Exception:
             full_text = ""
 
-    # المحاولة الثالثة: Groq Vision OCR (للملفات المصورة)
+    # المحاولة الثالثة: EasyOCR (في حال كان الملف عبارة عن صور/سكانر)
     if not full_text.strip():
-        st.info("🔄 الملف عبارة عن صور/سكانر، جاري استخراج النص بواسطة الذكاء الاصطناعي...")
+        st.info("🔄 الملف عبارة عن صور/سكانر، جاري استخراج النص بواسطة محرك OCR...")
         try:
+            reader = load_ocr_reader()
             uploaded_file.seek(0)
             pdf = pdfium.PdfDocument(uploaded_file)
             ocr_texts = []
-            
+
             for page in pdf:
-                # تحويل كل صفحة إلى صورة
+                # تحويل صفحة الـ PDF إلى صورة
                 image = page.render(scale=2).to_pil()
-                extracted_page_text = ocr_image_with_groq(image, groq_key)
-                if extracted_page_text.strip():
-                    ocr_texts.append(extracted_page_text)
-            
+                img_np = np.array(image)
+                
+                # استخراج النصوص الفرنسية والإنجليزية من الصورة
+                results = reader.readtext(img_np, detail=0)
+                page_extracted = " ".join(results)
+                if page_extracted.strip():
+                    ocr_texts.append(page_extracted)
+
             full_text = "\n\n".join(ocr_texts)
         except Exception as e:
             st.error(f"حدث خطأ أثناء قراءة الصور: {e}")
@@ -118,8 +79,6 @@ st.set_page_config(
 
 st.title("🩺 Medical French-to-English Translator Agent")
 
-groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-
 option = st.radio(
     "اختر طريقة إدخال النص الطبي:",
     ("رفع ملف (PDF / TXT)", "كتابة / نسخ النص مباشرة"),
@@ -130,12 +89,12 @@ source_text = ""
 
 if option == "رفع ملف (PDF / TXT)":
     uploaded_file = st.file_uploader(
-        "قم برفع ملف طبّي (حتى لو كان صور/سكانر)", type=["pdf", "txt"]
+        "قم برفع ملف طبّي (PDF نصي أو مصوّر / TXT)", type=["pdf", "txt"]
     )
     if uploaded_file is not None:
         filename = uploaded_file.name.lower()
         if filename.endswith(".pdf"):
-            source_text = extract_text_from_pdf(uploaded_file, groq_key)
+            source_text = extract_text_from_pdf(uploaded_file)
             if source_text.strip():
                 st.success(f"تم استخراج النص بنجاح! ({len(source_text.split())} كلمة)")
             else:
@@ -155,7 +114,7 @@ else:
 # زر الترجمة والعرض
 # ----------------------------------------------------
 if source_text.strip():
-    with st.expander("عرض النص الاستخراجي الأصلي"):
+    with st.expander("عرض النص المستخرج الأصلي"):
         st.write(source_text)
 
     if st.button("ترجمة النص"):
