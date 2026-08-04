@@ -1,12 +1,10 @@
 """
 agents.py
 --------
-تعريف الوكلاء الأربعة لعملية الترجمة والتدقيق الطبي.
+تعريف الوكلاء الطبية الخاصة بـ CrewAI.
 """
-
 from crewai import Agent
 
-# 1️⃣ وكيل الترجمة الطبية
 translator_agent = Agent(
     role="Medical Translator",
     goal="Translate medical French text into highly accurate English.",
@@ -17,7 +15,6 @@ translator_agent = Agent(
     verbose=True,
 )
 
-# 2️⃣ وكيل التقييم والتدقيق اللغوي
 reviewer_agent = Agent(
     role="Medical Reviewer",
     goal="Review translated medical terms for clinical accuracy.",
@@ -28,7 +25,6 @@ reviewer_agent = Agent(
     verbose=True,
 )
 
-# 3️⃣ وكيل التنقيح والصياغة النهائية
 polisher_agent = Agent(
     role="Medical English Editor",
     goal="Polish the final translated English text for native readability.",
