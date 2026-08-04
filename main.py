@@ -7,13 +7,13 @@ import os
 import sys
 import argparse
 
-# 1️⃣ ضبط بيئة العمل
+# 1️⃣ ضبط بيئة العمل لتفادي التضارب
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
 import streamlit as st
-from crewai import Crew, Process
+from crewai import Crew, Process, LLM
 from config import CHUNK_SIZE_WORDS
 from tasks import build_pipeline_tasks
 from terminology_db import query_relevant_terms
@@ -30,16 +30,24 @@ def chunk_text(text: str, chunk_size_words: int = CHUNK_SIZE_WORDS):
 
 def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
     """ترجمة قطعة واحدة باستعمال CrewAI و Groq"""
-    # جلب مفتاح Groq وتمريره للبيئة
+    
+    # 1️⃣ جلب المفتاح بأمان
     groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
     if groq_key:
         os.environ["GROQ_API_KEY"] = groq_key
 
+    # 2️⃣ إنشاء كائن LLM حقيقي خاص بـ Groq
+    groq_llm = LLM(
+        model="groq/llama-3.3-70b-versatile",
+        api_key=groq_key,
+        temperature=0.2
+    )
+
     tasks = build_pipeline_tasks(chunk, retrieved_terms)
     
-    # ربط النموذج بالوكلاء مباشرة كـ String
+    # 3️⃣ ربط كائن الـ LLM المعرّف بكافة الوكلاء
     for task in tasks:
-        task.agent.llm = "groq/llama-3.3-70b-versatile"
+        task.agent.llm = groq_llm
 
     crew = Crew(
         agents=[t.agent for t in tasks],
