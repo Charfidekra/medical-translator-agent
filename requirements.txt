@@ -8,3 +8,6 @@ pydantic-settings
 python-dotenv
 pypdf
 pypdfium2
+pdf2image
+pytesseract
+pillow
