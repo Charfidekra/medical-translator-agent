@@ -1,13 +1,15 @@
 """
 main.py
 -------
-نقطة الدخول للمشروع.
+نقطة الدخول للمشروع. تاخذ نص فرنسي (أو ملف)، تقسمه لقطع، وتشغل عليه
+الـ Crew (الوكلاء الثلاثة) قطعة بقطعة، ثم تجمع النتيجة في ملف نهائي.
 """
+
 import os
 import sys
 import argparse
 
-# 1️⃣ ضبط بيئة العمل لتفادي التضارب
+# 1️⃣ ضبط متغیرات البيئة لإيقاف التتبع والذاكرة المؤقتة لمنع التعارض
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["CREWAI_STORAGE_DIR"] = "/tmp"
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
@@ -20,7 +22,9 @@ from terminology_db import query_relevant_terms
 
 
 def chunk_text(text: str, chunk_size_words: int = CHUNK_SIZE_WORDS):
-    """تقسيم النص إلى قطع"""
+    """
+    تقسيم بسيط للنص حسب عدد الكلمات.
+    """
     words = text.split()
     chunks = []
     for i in range(0, len(words), chunk_size_words):
@@ -29,30 +33,31 @@ def chunk_text(text: str, chunk_size_words: int = CHUNK_SIZE_WORDS):
 
 
 def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
-    """ترجمة قطعة واحدة باستعمال CrewAI و Groq"""
-    
-    # 1️⃣ جلب المفتاح بأمان
+    """
+    ترجمة قطعة واحدة باستخدام نموذج Groq عبر واجهة OpenAI المستقرة.
+    """
+    # جلب المفتاح بأمان من Streamlit Secrets أو البيئة
     groq_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-    if groq_key:
-        os.environ["GROQ_API_KEY"] = groq_key
 
-    # 2️⃣ إنشاء كائن LLM حقيقي خاص بـ Groq
+    # استخدام واجهة OpenAI القياسية للتوجيه إلى سيرفرات Groq
+    # هذه الطريقة تتفادي خطأ ImportError الخاص بحزمة groq في CrewAI
     groq_llm = LLM(
-        model="groq/llama-3.3-70b-versatile",
+        model="openai/llama-3.3-70b-versatile",
+        base_url="https://api.groq.com/openai/v1",
         api_key=groq_key,
-        temperature=0.2
+        temperature=0.2,
     )
 
     tasks = build_pipeline_tasks(chunk, retrieved_terms)
-    
-    # 3️⃣ ربط كائن الـ LLM المعرّف بكافة الوكلاء
+
+    # ربط النموذج بكافة الوكلاء داخل المهام
     for task in tasks:
         task.agent.llm = groq_llm
 
     crew = Crew(
         agents=[t.agent for t in tasks],
         tasks=tasks,
-        process=Process.sequential,
+        process=Process.sequential,  # كل مهمة تلو الأخرى: ترجمة -> تدقيق -> تنقيح
         verbose=True,
     )
     result = crew.kickoff()
@@ -60,15 +65,26 @@ def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
 
 
 def translate_document(source_text: str) -> str:
-    """ترجمة المستند كاملاً"""
+    """
+    تقسيم النص الكامل إلى قطع وترجمته قطعة بقطعة.
+    """
     chunks = chunk_text(source_text)
+    print(f"[INFO] تم تقسيم النص إلى {len(chunks)} قطعة/قطع.")
+
     translated_parts = []
-    
     for idx, chunk in enumerate(chunks, start=1):
+        print(f"\n[INFO] جاري ترجمة القطعة {idx}/{len(chunks)}...")
+
+        # جلب المصطلحات من المعجم مع وجود معالجة للاستثناءات
         try:
             retrieved_terms = query_relevant_terms(chunk)
-        except Exception:
-            retrieved_terms = "No specific terminology available."
+            if not retrieved_terms:
+                retrieved_terms = "No specific local database terms found. Use standard medical terminology."
+        except Exception as e:
+            print(f"[WARN] خطأ أثناء جلب المصطلحات: {e}")
+            retrieved_terms = "No specific local database terms found. Use standard medical terminology."
+
+        print(f"[INFO] مصطلحات مسترجعة من المعجم:\n{retrieved_terms}\n")
 
         translated = translate_chunk(chunk, retrieved_terms)
         translated_parts.append(translated)
@@ -79,7 +95,8 @@ def translate_document(source_text: str) -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Medical French->English Translator Agent")
     parser.add_argument("--text", type=str, help="نص فرنسي مباشر للترجمة")
-    parser.add_argument("--file", type=str, help="مسار ملف .txt")
+    parser.add_argument("--file", type=str, help="مسار ملف .txt يحتوي النص الفرنسي")
+    parser.add_argument("--output", type=str, default="translated_output.txt")
     args = parser.parse_args()
 
     if args.text:
@@ -88,7 +105,14 @@ if __name__ == "__main__":
         with open(args.file, "r", encoding="utf-8") as f:
             source = f.read()
     else:
-        source = "L'insuffisance rénale aiguë (IRA) est définie par une diminution brutale du débit de filtration glomérulaire."
+        # نص تجريبي بسيط
+        source = (
+            "L'insuffisance rénale aiguë (IRA) est définie par une diminution "
+            "brutale et rapide du débit de filtration glomérulaire, entraînant "
+            "une accumulation des déchets azotés dans le sang."
+        )
+        print("[INFO] تجربة السكريبت على نص افتراضي...")
 
     final_text = translate_document(source)
+    print("\n--- النتيجة النهائية ---")
     print(final_text)
