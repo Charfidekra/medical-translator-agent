@@ -1,60 +1,41 @@
 """
 tasks.py
 --------
-تعريف المهام (Tasks) التي تربط الوكلاء ببعضهم: كل مهمة تاخذ مخرجات
-المهمة اللي قبلها (context) وتنتج مخرجات جديدة، لحد ما نوصلو للنص النهائي.
+تعريف المهام الخاصة بكل وكيل.
 """
-
 from crewai import Task
-from agents import (
-    build_translator_agent,
-    build_terminology_checker_agent,
-    build_proofreader_agent,
-)
+from agents import translator_agent, reviewer_agent, polisher_agent
 
 
-def build_pipeline_tasks(source_text: str, retrieved_terms: str = ""):
-    translator = build_translator_agent()
-    checker = build_terminology_checker_agent()
-    proofreader = build_proofreader_agent()
-
-    translate_task = Task(
+def build_pipeline_tasks(chunk: str, retrieved_terms: str = "") -> list[Task]:
+    """
+    بناء قائمة المهام مع تزويد السياق والمصطلحات الطبية.
+    """
+    task_translate = Task(
         description=(
-            "Translate the following French medical text into English.\n\n"
-            f"SOURCE TEXT:\n{source_text}\n\n"
-            f"RELEVANT GLOSSARY ENTRIES (may be empty):\n{retrieved_terms}"
+            f"Translate the following French medical text to English:\n\n{chunk}\n\n"
+            f"Use these retrieved terms if relevant:\n{retrieved_terms}"
         ),
-        expected_output=(
-            "A complete English translation of the source text, preserving "
-            "formatting, with [UNCERTAIN: ...] flags where relevant."
-        ),
-        agent=translator,
+        expected_output="An accurate English translation of the medical text.",
+        agent=translator_agent,
     )
 
-    check_terminology_task = Task(
+    task_review = Task(
         description=(
-            "Review the translation produced by the previous task against the "
-            "original French source text (repeated below for reference), and "
-            "correct any terminology issues.\n\n"
-            f"ORIGINAL FRENCH SOURCE:\n{source_text}"
+            "Review the translated text for clinical accuracy and terminology alignment. "
+            "Correct any medical inconsistencies."
         ),
-        expected_output=(
-            "The corrected English text, followed by a '### Corrections' "
-            "section listing every change made."
-        ),
-        agent=checker,
-        context=[translate_task],
+        expected_output="A clinically verified English medical text.",
+        agent=reviewer_agent,
     )
 
-    proofread_task = Task(
+    task_polish = Task(
         description=(
-            "Take the terminology-corrected English text from the previous task "
-            "and polish it into clean, professional, publication-ready medical "
-            "English. Do not change any clinical fact."
+            "Polishing and editing the verified medical translation to improve natural "
+            "flow and professional publication quality."
         ),
-        expected_output="The final, polished English text ready for use.",
-        agent=proofreader,
-        context=[check_terminology_task],
+        expected_output="A polished, publication-ready English medical translation.",
+        agent=polisher_agent,
     )
 
-    return [translate_task, check_terminology_task, proofread_task]
+    return [task_translate, task_review, task_polish]
