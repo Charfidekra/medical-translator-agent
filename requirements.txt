@@ -12,3 +12,5 @@ Pillow
 easyocr
 torch
 torchvision
+reportlab
+PyMuPDF
