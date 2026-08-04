@@ -8,9 +8,8 @@ from main import translate_document
 from openai import OpenAI
 from PIL import Image
 
-
 def ocr_image_with_groq(image: Image.Image, groq_key: str) -> str:
-    """استخراج النص من الصورة مباشرة باستخدام نموذج Vision الحديث والمستقر من Groq"""
+    """استخراج النص من الصورة باستخدام نماذج Vision المعتمدة من Groq"""
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1", api_key=groq_key
     )
@@ -19,29 +18,41 @@ def ocr_image_with_groq(image: Image.Image, groq_key: str) -> str:
     image.save(buffered, format="JPEG")
     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    response = client.chat.completions.create(
-        # تم تحديث الموديل إلى النسخة النشطة والمستقرة
-        model="llama-3.2-11b-vision-instruct",
-        messages=[
-            {
-                "role": "user",
-                "content": [
+    # قائمة بأحدث أسماء نماذج الرؤية المتاحة على Groq
+    vision_models = [
+        "llama-3.2-90b-vision-preview",
+        "llama-3.2-11b-vision-preview",
+        "llama-3.2-11b-vision-instruct",
+    ]
+
+    for model_name in vision_models:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
                     {
-                        "type": "text",
-                        "text": "Extract all text from this image exactly as it is, maintaining sentence order. Do not translate, just extract the exact French text.",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_b64}"
-                        },
-                    },
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Extract all text from this image exactly as it is, maintaining sentence order. Do not translate, just extract the exact French text.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_b64}"
+                                },
+                            },
+                        ],
+                    }
                 ],
-            }
-        ],
-        temperature=0.1,
-    )
-    return response.choices[0].message.content
+                temperature=0.1,
+            )
+            return response.choices[0].message.content
+        except Exception:
+            continue
+
+    raise RuntimeError("تعذر الوصول إلى نموذج رؤية نشط في Groq API.")
 
 
 def extract_text_from_pdf(uploaded_file, groq_key: str) -> str:
