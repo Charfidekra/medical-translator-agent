@@ -10,7 +10,7 @@ from PIL import Image
 
 
 def ocr_image_with_groq(image: Image.Image, groq_key: str) -> str:
-    """استخراج النص من الصورة مباشرة باستخدام نموذج Vision الخاص بـ Groq"""
+    """استخراج النص من الصورة مباشرة باستخدام نموذج Vision الحديث والمستقر من Groq"""
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1", api_key=groq_key
     )
@@ -20,7 +20,8 @@ def ocr_image_with_groq(image: Image.Image, groq_key: str) -> str:
     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     response = client.chat.completions.create(
-        model="llama-3.2-11b-vision-preview",
+        # تم تحديث الموديل إلى النسخة النشطة والمستقرة
+        model="llama-3.2-11b-vision-instruct",
         messages=[
             {
                 "role": "user",
