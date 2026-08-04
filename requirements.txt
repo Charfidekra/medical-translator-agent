@@ -6,8 +6,7 @@ openai
 pydantic>=2.0.0
 pydantic-settings
 python-dotenv
-pypdf
+pdfplumber
 pypdfium2
 pdf2image
-pytesseract
-pillow
+Pillow
