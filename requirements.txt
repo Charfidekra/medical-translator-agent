@@ -8,5 +8,7 @@ pydantic-settings
 python-dotenv
 pdfplumber
 pypdfium2
-pdf2image
 Pillow
+easyocr
+torch
+torchvision
