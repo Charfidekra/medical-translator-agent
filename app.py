@@ -292,4 +292,66 @@ if st.session_state.translation_results:
                 else:
                     save_col2.success("تم حفظ التصحيح فسجل المراجعة! ✅")
 else:
-    st.info("ارفعي ملف أو الصقي نص، ثم اضغطي 'ابدأ الترجمة' لرؤية النتائج هنا.")
+    st.info("ارفعي ملف أو الصقي نص، ثم اضغطي 'ابدأ الترجمة' لرؤية النتائج هنا.")  
+
+
+import streamlit as st
+from pypdf import PdfReader
+from main import translate_document
+
+
+def extract_text_from_file(uploaded_file) -> str:
+    """استخراج النص سواء كان الملف .txt أو .pdf"""
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith(".pdf"):
+        # قراءة صفحات ملف الـ PDF واستخراج النصوص
+        pdf_reader = PdfReader(uploaded_file)
+        extracted_text = []
+        for page_num, page in enumerate(pdf_reader.pages, start=1):
+            page_text = page.extract_text()
+            if page_text:
+                extracted_text.append(page_text)
+
+        full_text = "\n\n".join(extracted_text)
+
+        if not full_text.strip():
+            raise ValueError(
+                "لم يتم العثور على نص مكتوب داخل ملف الـ PDF (قد يكون الملف عبارة عن صور/سكانر)."
+            )
+
+        return full_text
+
+    else:
+        # للملفات النصية العادية .txt
+        return uploaded_file.getvalue().decode("utf-8")
+
+
+# ----------------------------------------------------
+# جزء واجهة Streamlit لرفع الملف وترجمته
+# ----------------------------------------------------
+st.title("🩺 Medical French-to-English Translator")
+
+uploaded_file = st.file_uploader(
+    "قم برفع ملف طبّي (PDF أو TXT)", type=["pdf", "txt"]
+)
+
+if uploaded_file is not None:
+    try:
+        source_text = extract_text_from_file(uploaded_file)
+        st.success(
+            f"تم استخراج النص بنجاح! ({len(source_text.split())} كلمة)"
+        )
+
+        # عرض جزء من النص المستخرج للتأكد
+        with st.expander("عرض النص المستخرج من الملف"):
+            st.text_area("النصر الأصلي", source_text, height=200)
+
+        if st.button("ترجمة المستند"):
+            with st.spinner("جاري الترجمة والتدقيق عبر CrewAI..."):
+                translated_result = translate_document(source_text)
+                st.subheader("الترجمة النهائية:")
+                st.write(translated_result)
+
+    except Exception as e:
+        st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
