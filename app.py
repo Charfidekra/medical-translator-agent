@@ -24,25 +24,33 @@ def extract_page_text_with_ocr(page_img_np, reader) -> str:
 
 
 def add_watermark(page, text="by dekra charfi"):
-    """إضافة علامة مائية بالاسم في مركز الصفحة"""
+    """إضافة علامة مائية بالاسم بطريقة آمنة تمنع خطأ bad rotate value"""
     rect = page.rect
-    page.insert_text(
-        fitz.Point(rect.width / 4, rect.height / 2),
+    # إنشاء مربع نص في منتصف الصفحة تماماً
+    watermark_rect = fitz.Rect(
+        rect.width * 0.1,
+        rect.height * 0.45,
+        rect.width * 0.9,
+        rect.height * 0.55
+    )
+    
+    # استخدام insert_textbox مع زاوية قياسية مسموحة أو بدون دوران لتفادي الاستثناء
+    page.insert_textbox(
+        watermark_rect,
         text,
-        fontsize=28,
+        fontsize=26,
         fontname="helv",
         color=(0.7, 0.7, 0.7),
-        rotate=45,
-        overlay=True,
+        align=fitz.LINK_TEXT,
+        overlay=True
     )
 
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
-    إنشاء صفحة أفقية مقسومة مع التعامل الآمن مع زوايا الدوران:
+    إنشاء صفحة أفقية مقسومة مع التعامل الآمن مع دوران الصفحات والعلامة المائية:
     - النصف الأيسر: صورة الصفحة الأصلية.
     - النصف الأيمن: النص المترجم المنسق.
-    مع إضافة العلامة المائية by dekra charfi.
     """
     reader = load_ocr_reader()
 
@@ -55,20 +63,15 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. الاستخراج الآمن للصورة دون المساس بزاوية الدوران الداخلية للـ PDF
-        # نأخذ الـ Pixmap مع تعديل الزاوية للصفر في الخيارات إن وجدت
+        # 1. استخراج الصورة بالدوران الطبيعي المخزن بالصفحة
         pix = orig_page.get_pixmap(dpi=150)
-        
-        # تحويل الـ Pixmap إلى صورة PIL لمعالجتها بأمان
         img = Image.open(io.BytesIO(pix.tobytes("png")))
 
-        # تصحيح الاتجاه إذا كانت زاوية الدوران معجلة في خصائص الصفحة
+        # تعديل اتجاه الصورة في PIL إذا كانت الصفحة مدورة في خصائص الـ PDF
         rotation = orig_page.rotation
         if rotation in [90, 180, 270]:
-            # تدوير الصورة بالاتجاه المعاكس لتعديلها
             img = img.rotate(-rotation, expand=True)
 
-        # تحويل الصورة إلى Numpy Array لتمريرها لـ EasyOCR
         img_np = np.array(img)
 
         # 2. قراءة النص من الصفحة وترجمته
@@ -84,12 +87,10 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             f"--- Page {page_num + 1} ---\n{translated_text}"
         )
 
-        # 3. إعداد أبعاد الصفحة
-        # نعتمد أبعاد الصورة الفعلية بعد التعديل
+        # 3. إعداد أبعاد الجانب المترجم
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
 
-        # إذا كانت الصفحة مدورة بـ 90 أو 270 درجة نعكس الأبعاد
         if rotation in [90, 270]:
             half_width, page_height = page_height, half_width
 
@@ -138,7 +139,7 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
-        # أ) رسم الصورة المصححة للصفحة الأصلية في النصف الأيسر
+        # أ) رسم صورة الصفحة الأصلية المصححة
         img_byte_arr = io.BytesIO()
         img.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -156,7 +157,7 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             0,
         )
 
-        # ج) إضافة العلامة المائية "by dekra charfi"
+        # ج) إضافة العلامة المائية "by dekra charfi" الآمنة
         add_watermark(combo_page, "by dekra charfi")
 
     output_buffer = io.BytesIO()
