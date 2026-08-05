@@ -37,11 +37,11 @@ def translate_chunk(chunk: str, retrieved_terms: str = "") -> str:
 
     os.environ["OPENAI_API_KEY"] = str(groq_key).strip()
 
-    groq_llm = LLM(
-        model="openai/llama-3.3-70b-versatile",
-        base_url="https://api.groq.com/openai/v1",
-        api_key=str(groq_key).strip(),
-        temperature=0.2,
+
+llm = LLM(
+    model="groq/llama-3.1-8b-instant",
+    api_key=os.environ.get("GROQ_API_KEY")
+)
     )
 
     tasks = build_pipeline_tasks(chunk, retrieved_terms)
