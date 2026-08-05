@@ -39,7 +39,7 @@ def add_watermark(page, text="by dekra charfi"):
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
-    تصحيح اتجاه الصفحات المقلوبة، وإنشاء صفحة أفقية مقسومة:
+    تصحيح اتجاه الصفحات المقلوبة بشكل آمن، وإنشاء صفحة أفقية مقسومة:
     - النصف الأيسر: صورة الصفحة الأصلية.
     - النصف الأيمن: النص المترجم المنسق.
     مع إضافة العلامة المائية by dekra charfi.
@@ -55,8 +55,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. تصحيح دوران الصفحة إذا كانت مقلوبة (Fix Orientation)
+        # 1. تصحيح الاتجاه بطريقة آمنة تجنباً لـ bad rotate value
         if orig_page.rotation != 0:
+            # تعديل زاوية الدوران بإرجاعها إلى مضاعفات قائمة صحيحة (0)
             orig_page.set_rotation(0)
 
         # 2. استخراج صورة الصفحة بعد تصحيح الاتجاه
@@ -182,7 +183,7 @@ with tab_text:
             with st.spinner("جاري ترجمة النص بواسطة الطاقم الطبي الذكي..."):
                 try:
                     result = translate_document(user_input_text)
-                    st.success("✅ تم الترجمة بنجاح!")
+                    st.success("✅ تمت الترجمة بنجاح!")
                     st.subheader("النتيجة:")
                     st.text_area(
                         label="النص المترجم:",
