@@ -1,3 +1,4 @@
+
 import io
 import fitz  # PyMuPDF
 import easyocr
@@ -8,89 +9,106 @@ import streamlit as st
 from main import translate_document
 from PIL import Image
 
+# مكتبات بناء مستند منظم
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
 
 @st.cache_resource
 def load_ocr_reader():
-    """تحميل EasyOCR وتخزينه في الذاكرة"""
+    """تحميل EasyOCR وتخزينه في الذاكرة لضمان السرعة"""
     return easyocr.Reader(["fr", "en"], gpu=False)
 
 
-def replace_text_in_pdf_layout(uploaded_file, groq_translator_func) -> bytes:
+def extract_page_text_with_ocr(page_img_np, reader) -> str:
+    """استخراج النصوص من صورة الصفحة عبر EasyOCR"""
+    results = reader.readtext(page_img_np, detail=0)
+    return " ".join([t for t in results if t.strip()])
+
+
+def generate_aligned_translated_pdf(uploaded_file, translator_func) -> bytes:
     """
-    تقوم هذه الدالة بفتح الـ PDF الأصلي، تحديد أماكن النصوص الفرنسية،
-    مسحها (White-out) مع ترك الصور في مكانها، ثم كتابة الترجمة فوق الصفحة الأصلية.
+    إنشاء ملف PDF جديد يدمج صورة الصفحة الأصلية (مع كافة الصور والأشكال)
+    وبجانبها/بعدها النص المترجم المنسق بدون أي تداخل في السطور.
     """
     reader = load_ocr_reader()
     
-    # فتح المستند الأصلي باستخدام PyMuPDF
     uploaded_file.seek(0)
-    pdf_bytes = uploaded_file.read()
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    orig_doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    new_doc = fitz.open()  # مستند مخرج جديد
 
-    for page_num in range(len(doc)):
-        page = doc[page_num]
+    for page_num in range(len(orig_doc)):
+        orig_page = orig_doc[page_num]
         
-        # 1. تحويل الصفحة إلى صورة لاستخراج النصوص والـ Bounding Boxes
-        pix = page.get_pixmap(dpi=150)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
-        img_np = np.array(img)
-
-        # 2. قراءة النصوص مع مواضعها الجغرافية بالصفحة (bboxes)
-        ocr_results = reader.readtext(img_np)
+        # 1. استخراج صورة الصفحة الأصلية بكامل عناصرها وشكلها
+        pix = orig_page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
         
-        if not ocr_results:
-            continue
-
-        # تجميع كامل النص الفرنسي الخاص بالصفحة لترجمته
-        page_french_text = " ".join([res[1] for res in ocr_results if res[1].strip()])
+        # 2. قراءة النص من الصفحة وترجمته
+        img_np = np.array(Image.open(io.BytesIO(img_bytes)))
+        french_text = extract_page_text_with_ocr(img_np, reader)
         
-        if not page_french_text.strip():
-            continue
+        translated_text = ""
+        if french_text.strip():
+            translated_text = translator_func(french_text)
+        else:
+            translated_text = "No text detected on this page."
 
-        # 3. ترجمة النص الفرنسي الكامل للصفحة إلى الإنجليزية
-        translated_page_text = groq_translator_func(page_french_text)
-
-        # 4. مسح الكلمات الفرنسية القديمة من الصفحة الأصلية (مع ترك الصور دون لمس)
-        # أبعاد الصفحة في fitz تختلف قليلاً عن أبعاد الصورة
-        rect_scale_x = page.rect.width / img_np.shape[1]
-        rect_scale_y = page.rect.height / img_np.shape[0]
-
-        for bbox, text, prob in ocr_results:
-            # حساب مستطيل النص الأصلي
-            (tl, tr, br, bl) = bbox
-            x0, y0 = tl[0] * rect_scale_x, tl[1] * rect_scale_y
-            x1, y1 = br[0] * rect_scale_x, br[1] * rect_scale_y
-            
-            rect = fitz.Rect(x0, y0, x1, y1)
-            # تغطية النص الفرنسي القديم بمستطيل أبيض لمسحه
-            page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))
-
-        # 5. كتابة النص المترجم في أعلى منطقة النص مع الحفاظ على أبعاد باقي العناصر والصور
-        # نأخذ أول منطقة بدأ فيها النص بالصفحة
-        first_bbox = ocr_results[0][0]
-        start_x = first_bbox[0][0] * rect_scale_x
-        start_y = first_bbox[0][1] * rect_scale_y
-        
-        target_rect = fitz.Rect(
-            start_x, 
-            start_y, 
-            page.rect.width - 20, 
-            page.rect.height - 20
+        # 3. إنشاء صفحة إنجليزية نظيفة ومنسقة
+        buffer = io.BytesIO()
+        doc_temp = SimpleDocTemplate(
+            buffer,
+            pagesize=(orig_page.rect.width, orig_page.rect.height),
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=30,
+            bottomMargin=30,
         )
-
-        # إدراج النص المترجم بداخل الصفحة الأصلية
-        page.insert_textbox(
-            target_rect,
-            translated_page_text,
-            fontsize=9,
-            fontname="helv",
-            color=(0, 0, 0)
+        
+        styles = getSampleStyleSheet()
+        custom_style = ParagraphStyle(
+            "DocStyle",
+            parent=styles["Normal"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=14,
+            spaceAfter=10,
         )
+        
+        story = []
+        # إضافة عنوان رقم الصفحة
+        title_style = ParagraphStyle(
+            "TitleStyle",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=12,
+            spaceAfter=12,
+        )
+        story.append(Paragraph(f"--- Translated Page {page_num + 1} ---", title_style))
+        
+        for para in translated_text.split("\n\n"):
+            if para.strip():
+                formatted = para.strip().replace("\n", "<br/>")
+                story.append(Paragraph(formatted, custom_style))
+                story.append(Spacer(1, 6))
 
-    # حفظ المستند الأصلي المعدل بنفس الترتيب والصور
+        doc_temp.build(story)
+        buffer.seek(0)
+
+        # 4. دمج الصفحة الأصلية (الصورة والتخطيط) تليها الصفحة المترجمة المنسقة
+        # أ) إضافة الصفحة الأصلية بكامل صورها
+        new_doc.insert_pdf(orig_doc, from_page=page_num, to_page=page_num)
+        
+        # ب) إضافة الصفحة المترجمة المنظمة
+        translated_pdf_page = fitz.open(stream=buffer.getvalue(), filetype="pdf")
+        new_doc.insert_pdf(translated_pdf_page)
+
     output_buffer = io.BytesIO()
-    doc.save(output_buffer)
-    doc.close()
+    new_doc.save(output_buffer)
+    new_doc.close()
+    orig_doc.close()
+    
     output_buffer.seek(0)
     return output_buffer.getvalue()
 
@@ -99,34 +117,32 @@ def replace_text_in_pdf_layout(uploaded_file, groq_translator_func) -> bytes:
 # واجهة Streamlit
 # ----------------------------------------------------
 st.set_page_config(
-    page_title="Medical PDF Layout Translator", page_icon="🩺", layout="wide"
+    page_title="Medical PDF Aligned Translator", page_icon="🩺", layout="wide"
 )
 
-st.title("🩺 Medical PDF Translator (مع الحفاظ على الأشكال والصور)")
+st.title("🩺 Medical PDF Translator (منسق وبدون تداخل السطور)")
 
 uploaded_file = st.file_uploader(
-    "قم برفع ملف الـ PDF الأصلي (سيتم استبدال النص بالترجمة مع الإبقاء على مكان الصور)",
+    "قم برفع ملف الـ PDF الطبي (سيتم إخراج ملف منظم يحتوي على الصفحة الأصلية وبجانبها الترجمة الإنجليزية)",
     type=["pdf"]
 )
 
 if uploaded_file is not None:
-    st.success("تم استلام الملف بنجاح! جاهز للمعالجة والاستبدال المباشر.")
+    st.success("تم استلام الملف بنجاح!")
 
-    if st.button("ترجمة الملف وإصدار نسخة مستبدلة بنفس التنسيق"):
-        with st.spinner("جاري مسح النصوص الفرنسية، كتابة الترجمة الإنجليزية وتصميم المستند الأصلي..."):
+    if st.button("ترجمة الملف وإنشاء نسخة منسقة"):
+        with st.spinner("جاري معالجة الصفحة، كتابة الترجمة الإنجليزية وتنسيق المستند..."):
             try:
-                # تشغيل معالجة الملف واستبدال النصوص داخل التخطيط الأصلي
-                translated_pdf_bytes = replace_text_in_pdf_layout(
+                final_pdf_bytes = generate_aligned_translated_pdf(
                     uploaded_file, translate_document
                 )
 
-                st.success("✅ تم إكمال العملية بنجاح وتحديث المستند الأصلي!")
+                st.success("✅ تم إنشاء المستند المترجم بنجاح وبأعلى درجة تنسيق!")
 
-                # تقديم زر التحميل للملف التفاعلي المترجم
                 st.download_button(
-                    label="📥 تحميل الملف الأصلي المترجم (مع الصور والتخطيط)",
-                    data=translated_pdf_bytes,
-                    file_name="translated_layout_document.pdf",
+                    label="📥 تحميل الملف المترجم المنظم (PDF)",
+                    data=final_pdf_bytes,
+                    file_name="aligned_translated_document.pdf",
                     mime="application/pdf",
                 )
             except Exception as e:
