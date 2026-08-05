@@ -1,13 +1,13 @@
 import os
 from crewai import Agent, Crew, Process, Task, LLM
 
-# 1. إعداد الـ LLM الخاص بـ Groq بدون إضافة cache=False كقيمة بولينية
+# 1. إعداد الـ LLM
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
 )
 
-# 2. تعريف العميل الطبي المترجم مع إلغاء الكاش الخاص بالعميل
+# 2. تعريف العميل الطبي المترجم (بدون خيارات cache المسببة للخلل)
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate French medical content into clean, standard English without repeating headers.",
@@ -17,7 +17,6 @@ medical_translator = Agent(
     ),
     verbose=False,
     memory=False,
-    cache=False,  # تعطيل كاش الـ Agent
     llm=llm
 )
 
@@ -34,12 +33,12 @@ def translate_document(text_content: str) -> str:
         agent=medical_translator
     )
 
+    # 3. إعداد الـ Crew بدون تمرير cache=False لتفادي خطأ .get()
     crew = Crew(
         agents=[medical_translator],
         tasks=[translation_task],
         process=Process.sequential,
-        memory=False,
-        cache=False  # تعطيل كاش الـ Crew
+        memory=False
     )
 
     result = crew.kickoff()
