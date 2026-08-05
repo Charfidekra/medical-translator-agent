@@ -24,9 +24,8 @@ def extract_page_text_with_ocr(page_img_np, reader) -> str:
 
 
 def add_watermark(page, text="by dekra charfi"):
-    """إضافة علامة مائية بالاسم بطريقة آمنة تمنع خطأ bad rotate value"""
+    """إضافة علامة مائية بالاسم في مركز الصفحة بطريقة آمنة وبدون أخطاء"""
     rect = page.rect
-    # إنشاء مربع نص في منتصف الصفحة تماماً
     watermark_rect = fitz.Rect(
         rect.width * 0.1,
         rect.height * 0.45,
@@ -34,14 +33,14 @@ def add_watermark(page, text="by dekra charfi"):
         rect.height * 0.55
     )
     
-    # استخدام insert_textbox مع زاوية قياسية مسموحة أو بدون دوران لتفادي الاستثناء
+    # align=1 تعني محاذاة النص في المنتصف (Center)
     page.insert_textbox(
         watermark_rect,
         text,
         fontsize=26,
         fontname="helv",
         color=(0.7, 0.7, 0.7),
-        align=fitz.LINK_TEXT,
+        align=1,
         overlay=True
     )
 
@@ -49,7 +48,7 @@ def add_watermark(page, text="by dekra charfi"):
 def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
     إنشاء صفحة أفقية مقسومة مع التعامل الآمن مع دوران الصفحات والعلامة المائية:
-    - النصف الأيسر: صورة الصفحة الأصلية.
+    - الن نصف الأيسر: صورة الصفحة الأصلية.
     - النصف الأيمن: النص المترجم المنسق.
     """
     reader = load_ocr_reader()
@@ -157,7 +156,7 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             0,
         )
 
-        # ج) إضافة العلامة المائية "by dekra charfi" الآمنة
+        # ج) إضافة العلامة المائية "by dekra charfi"
         add_watermark(combo_page, "by dekra charfi")
 
     output_buffer = io.BytesIO()
