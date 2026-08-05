@@ -1,8 +1,11 @@
 import os
-from crewai import Agent, Crew, Process, Task
+from crewai import Agent, Crew, Process, Task, LLM
 
-# تعريف النموذج بطريقة مباشرة ومتوافقة مع جميع إصدارات CrewAI
-LLM_MODEL = "groq/llama-3.1-8b-instant"
+# إنشاء كائن الـ LLM مع تحديد نموذج groq/llama-3.1-8b-instant المتاح
+llm = LLM(
+    model="groq/llama-3.1-8b-instant",
+    api_key=os.environ.get("GROQ_API_KEY")
+)
 
 # 1. تعريف العميل الطبي المترجم
 medical_translator = Agent(
@@ -15,7 +18,7 @@ medical_translator = Agent(
     ),
     verbose=False,
     memory=False,
-    llm=LLM_MODEL
+    llm=llm
 )
 
 def translate_document(text_content: str) -> str:
