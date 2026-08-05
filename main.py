@@ -1,14 +1,13 @@
 import os
-from crewai import Agent, Crew, Process, Task
-from langchain_groq import ChatGroq
+from crewai import Agent, Crew, Process, Task, LLM
 
-# 1. إعداد الاتصال بـ Groq عبر ChatGroq المتوافق مع CrewAI
-llm = ChatGroq(
-    model="llama-3.1-8b-instant",
+# تهيئة الـ LLM مباشرة عبر كائن CrewAI LLM المتوافق مع Pydantic v2
+llm = LLM(
+    model="groq/llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
 )
 
-# 2. تعريف العميل الطبي المترجم
+# 1. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate French medical content into clean, standard English without repeating headers.",
