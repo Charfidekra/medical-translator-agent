@@ -1,13 +1,18 @@
 import os
+
+# تعطيل التخزين المؤقت على مستوى البيئة لمنع CrewAI من إضافة cache_breakpoint لـ Groq
+os.environ["LOOKUP_CACHE"] = "False"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+
 from crewai import Agent, Crew, Process, Task, LLM
 
-# 1. إعداد الـ LLM
+# 1. إعداد الـ LLM مع تعيين المعلمات بشكل مباشر
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
 )
 
-# 2. تعريف العميل الطبي المترجم (بدون خيارات cache المسببة للخلل)
+# 2. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate French medical content into clean, standard English without repeating headers.",
@@ -33,7 +38,6 @@ def translate_document(text_content: str) -> str:
         agent=medical_translator
     )
 
-    # 3. إعداد الـ Crew بدون تمرير cache=False لتفادي خطأ .get()
     crew = Crew(
         agents=[medical_translator],
         tasks=[translation_task],
