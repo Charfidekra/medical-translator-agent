@@ -1,35 +1,36 @@
 import os
-from crewai import Agent, Crew, Process, Task, LLM
+from crewai import Agent, Crew, Process, Task
+from langchain_groq import ChatGroq
 
-# إعداد نموذج Groq الخفيف المتاح لتفادي تجاوز حدود التوكنز
-llm_instance = LLM(
-    model="groq/llama-3.1-8b-instant",
+# 1. إعداد الاتصال بـ Groq عبر ChatGroq المتوافق مع CrewAI
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
 )
 
+# 2. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
-    goal="Translate medical documents accurately from French/Arabic to English while maintaining precise medical terminology.",
+    goal="Translate French medical content into clean, standard English without repeating headers.",
     backstory=(
-        "You are an expert medical translator and physician. You specialize in translating "
-        "complex medical concepts, anatomical terms, and clinical notes into precise English, "
-        "ensuring all medical jargon and tables are reflected accurately."
+        "You are an expert physician and medical translator. You provide direct, accurate English translations "
+        "of medical lecture notes, formulas, and terminology. Do not output conversational preamble or repeated headers."
     ),
     verbose=False,
     memory=False,
-    llm=llm_instance
+    llm=llm
 )
 
 def translate_document(text_content: str) -> str:
-    """دالة الترجمة التي يستدعيها app.py"""
+    """دالة الترجمة المباشرة التي يستدعيها app.py"""
     
     translation_task = Task(
         description=(
-            f"Translate the following medical text into clear, academic, and accurate English. "
-            f"Preserve all original formatting, structures, and terminology where applicable.\n\n"
+            f"Translate the following medical text directly into accurate, professional English.\n"
+            f"IMPORTANT: Output ONLY the translated text.\n\n"
             f"Text to translate:\n{text_content}"
         ),
-        expected_output="A complete and accurate English translation of the provided medical text.",
+        expected_output="Direct English translation of the medical text only.",
         agent=medical_translator
     )
 
