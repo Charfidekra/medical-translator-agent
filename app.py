@@ -33,7 +33,6 @@ def add_watermark(page, text="by dekra charfi"):
         rect.height * 0.55
     )
     
-    # align=1 تعني محاذاة النص في المنتصف (Center)
     page.insert_textbox(
         watermark_rect,
         text,
@@ -47,9 +46,8 @@ def add_watermark(page, text="by dekra charfi"):
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
-    إنشاء صفحة أفقية مقسومة مع التعامل الآمن مع دوران الصفحات والعلامة المائية:
-    - الن نصف الأيسر: صورة الصفحة الأصلية.
-    - النصف الأيمن: النص المترجم المنسق.
+    تعديل اتجاه الصفحات المقلوبة رأساً على عقب (180 درجة)، وقراءتها عبر OCR، 
+    ثم دمج الصفحات أفقياً وإضافة العلامة المائية by dekra charfi.
     """
     reader = load_ocr_reader()
 
@@ -62,18 +60,18 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. استخراج الصورة بالدوران الطبيعي المخزن بالصفحة
+        # 1. استخراج صورة الصفحة
         pix = orig_page.get_pixmap(dpi=150)
         img = Image.open(io.BytesIO(pix.tobytes("png")))
 
-        # تعديل اتجاه الصورة في PIL إذا كانت الصفحة مدورة في خصائص الـ PDF
-        rotation = orig_page.rotation
-        if rotation in [90, 180, 270]:
-            img = img.rotate(-rotation, expand=True)
+        # تصحيح تدوير الصفحة إذا كانت مصفوفة رأساً على عقب (Flip 180)
+        # نقوم بتدوير الصورة بـ 180 درجة تلقائياً ليصبح النص قائماً وصحيحاً لـ OCR
+        img_corrected = img.rotate(180, expand=True)
 
-        img_np = np.array(img)
+        # تحويل الصورة المصححة لـ Numpy Array لتمريرها لـ EasyOCR
+        img_np = np.array(img_corrected)
 
-        # 2. قراءة النص من الصفحة وترجمته
+        # 2. قراءة النص عبر EasyOCR بعد تعديل الدوران
         french_text = extract_page_text_with_ocr(img_np, reader)
 
         translated_text = ""
@@ -86,12 +84,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             f"--- Page {page_num + 1} ---\n{translated_text}"
         )
 
-        # 3. إعداد أبعاد الجانب المترجم
+        # 3. إعداد أبعاد الجانب المترجم الأيمن
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
-
-        if rotation in [90, 270]:
-            half_width, page_height = page_height, half_width
 
         buffer = io.BytesIO()
         doc_temp = SimpleDocTemplate(
@@ -138,9 +133,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
-        # أ) رسم صورة الصفحة الأصلية المصححة
+        # أ) رسم صورة الصفحة الأصلية المصححة (المعدلة عدلياً) في النصف الأيسر
         img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format="PNG")
+        img_corrected.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
             fitz.Rect(0, 0, half_width, page_height),
             stream=img_byte_arr.getvalue()
