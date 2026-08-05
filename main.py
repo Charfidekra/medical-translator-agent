@@ -1,7 +1,7 @@
 import os
 from crewai import Agent, Crew, Process, Task, LLM
 
-# إنشاء كائن الـ LLM مع تحديد نموذج groq/llama-3.1-8b-instant المتاح
+# إعداد نموذج Groq الخفيف والسريع لتفادي حدود التوكنز (Rate Limit)
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
