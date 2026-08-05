@@ -1,13 +1,14 @@
 import os
 from crewai import Agent, Crew, Process, Task, LLM
 
-# تهيئة الـ LLM مباشرة عبر كائن CrewAI LLM المتوافق مع Pydantic v2
+# 1. إعداد الـ LLM مع تعطيل cache_breakpoint صراحة لمنع تعارض Groq
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
-    api_key=os.environ.get("GROQ_API_KEY")
+    api_key=os.environ.get("GROQ_API_KEY"),
+    cache=False  # تعطيل التخزين المؤقت لمنع إرسال cache_breakpoint
 )
 
-# 1. تعريف العميل الطبي المترجم
+# 2. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate French medical content into clean, standard English without repeating headers.",
@@ -17,6 +18,7 @@ medical_translator = Agent(
     ),
     verbose=False,
     memory=False,
+    cache=False,  # تعطيل كاش Agent لمنع الخطأ
     llm=llm
 )
 
@@ -36,7 +38,9 @@ def translate_document(text_content: str) -> str:
     crew = Crew(
         agents=[medical_translator],
         tasks=[translation_task],
-        process=Process.sequential
+        process=Process.sequential,
+        memory=False,
+        cache=False  # تعطيل كاش الـ Crew لمنع إضافة cache_breakpoint
     )
 
     result = crew.kickoff()
