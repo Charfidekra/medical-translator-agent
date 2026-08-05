@@ -23,11 +23,27 @@ def extract_page_text_with_ocr(page_img_np, reader) -> str:
     return " ".join([t for t in results if t.strip()])
 
 
-def generate_side_by_side_pdf(uploaded_file, translator_func) -> bytes:
+def add_watermark(page, text="by dekra charfi"):
+    """إضافة علامة مائية بالاسم في مركز الصفحة"""
+    rect = page.rect
+    # كتابة العلامة المائية بلون رمادي خفيف وشفاف في المنتصف
+    page.insert_text(
+        fitz.Point(rect.width / 4, rect.height / 2),
+        text,
+        fontsize=28,
+        fontname="helv",
+        color=(0.7, 0.7, 0.7),
+        rotate=45,  # مائلة بـ 45 درجة
+        overlay=True
+    )
+
+
+def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
-    تقوم هذه الدالة بإنشاء صفحة أفقية (Landscape) مقسومة إلى نصفين:
-    - النصف الأيسر: صورة الصفحة الأصلية بكامل صورها وجداولها.
-    - النصف الأيمن: النص المترجم منسق ومقابل لها تماماً.
+    تقوم هذه الدالة بضبط اتجاه الصفحات المقلوبة، وإنشاء صفحة أفقية مقسومة:
+    - النصف الأيسر: صورة الصفحة الأصلية (بعد تعديل دورانها).
+    - النصف الأيمن: النص المترجم المنسق.
+    مع إضافة العلامة المائية by dekra charfi.
     """
     reader = load_ocr_reader()
 
@@ -35,14 +51,20 @@ def generate_side_by_side_pdf(uploaded_file, translator_func) -> bytes:
     orig_doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     new_doc = fitz.open()
 
+    all_translated_texts = []
+
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. استخراج صورة الصفحة الأصلية بكامل صورها وأشكالها
+        # 1. تصحيح دوران الصفحة إذا كانت مقلوبة (Fix Orientation)
+        if orig_page.rotation != 0:
+            orig_page.set_rotation(0)
+
+        # 2. استخراج صورة الصفحة بعد تصحيح الاتجاه
         pix = orig_page.get_pixmap(dpi=150)
         img_bytes = pix.tobytes("png")
 
-        # 2. قراءة النص من الصفحة وترجمته
+        # 3. قراءة النص من الصفحة وترجمته
         img_np = np.array(Image.open(io.BytesIO(img_bytes)))
         french_text = extract_page_text_with_ocr(img_np, reader)
 
@@ -52,8 +74,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func) -> bytes:
         else:
             translated_text = "لا يوجد نص مستخرج في هذه الصفحة."
 
-        # 3. إنشاء مستند وقتي للنصف المترجم الأيمن
-        # أبعاد النصف الأيمن تكون مساوية لأبعاد الصفحة الأصلية
+        all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
+
+        # 4. إعداد النصف المترجم الأيمن
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
 
@@ -96,12 +119,11 @@ def generate_side_by_side_pdf(uploaded_file, translator_func) -> bytes:
         doc_temp.build(story)
         buffer.seek(0)
 
-        # 4. دمج الجانبين في صفحة واحدة أفقية (Landscape)
-        # العرض الكلي للصفحة الجديدة = عرض الصفحة الأصلية × 2
+        # 5. دمج الجانبين في صفحة أفقية واحدة (Landscape)
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
-        # أ) رسم الصفحة الأصلية بالصور والأشكال في النصف الأيسر
+        # أ) رسم الصفحة الأصلية في النصف الأيسر
         combo_page.show_pdf_page(
             fitz.Rect(0, 0, half_width, page_height),
             orig_doc,
@@ -116,41 +138,54 @@ def generate_side_by_side_pdf(uploaded_file, translator_func) -> bytes:
             0
         )
 
+        # ج) إضافة العلامة المائية "by dekra charfi"
+        add_watermark(combo_page, "by dekra charfi")
+
     output_buffer = io.BytesIO()
     new_doc.save(output_buffer)
     new_doc.close()
     orig_doc.close()
 
     output_buffer.seek(0)
-    return output_buffer.getvalue()
+    full_text_combined = "\n\n".join(all_translated_texts)
+    return output_buffer.getvalue(), full_text_combined
 
 
 # ----------------------------------------------------
 # واجهة Streamlit
 # ----------------------------------------------------
 st.set_page_config(
-    page_title="Medical Split PDF Translator", page_icon="🩺", layout="wide"
+    page_title="Medical Translator Agent", page_icon="🩺", layout="wide"
 )
 
-st.title("🩺 Medical PDF Translator (صفحة أفقية مقسومة: أصل + ترجمة)")
+st.title("🩺 Medical Translator Agent")
 
 uploaded_file = st.file_uploader(
-    "قم برفع ملف الـ PDF الطبي",
+    "قم برفع ملف الـ PDF الطبي (سيتم تصحيح اتجاه الصفحات المقلوبة وتقسيم الصفحات مع إضافة العلامة المائية)",
     type=["pdf"]
 )
 
 if uploaded_file is not None:
     st.success("تم استلام الملف بنجاح!")
 
-    if st.button("ترجمة الملف وإنشاء المستند المقسوم (Side-by-Side)"):
-        with st.spinner("جاري الترجمة وإعادة تقسيم الصفحة بالعرض..."):
+    if st.button("ترجمة الملف وإصدار النسخة المقسومة"):
+        with st.spinner("جاري تصحيح الاتجاه، الترجمة، وإضافة العلامة المائية by dekra charfi..."):
             try:
-                final_pdf_bytes = generate_side_by_side_pdf(
+                final_pdf_bytes, combined_text = generate_side_by_side_pdf(
                     uploaded_file, translate_document
                 )
 
-                st.success("✅ تم دمج الأصل والترجمة في صفحة واحدة بالعرض بنجاح!")
+                st.success("✅ تم معالجة المستند بنجاح!")
 
+                # 1. خانة لعرض النص المترجم مباشرة في الواجهة
+                st.subheader("📝 النص المترجم:")
+                st.text_area(
+                    label="معاينة النص الإنجليزي المترجم:",
+                    value=combined_text,
+                    height=300
+                )
+
+                # 2. زر تحميل ملف الـ PDF المترجم بالعرض والمحمي بالعلامة المائية
                 st.download_button(
                     label="📥 تحميل الملف المترجم المقسوم (PDF)",
                     data=final_pdf_bytes,
