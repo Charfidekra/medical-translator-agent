@@ -16,11 +16,19 @@ if not GROQ_API_KEY:
         "أضفه في إعدادات Streamlit Cloud تحت Settings > Secrets."
     )
 
+# ============================================================
+# ملاحظة: نموذج llama-3.1-8b-instant صغير جدًا للترجمة الطبية الدقيقة
+# ويعطي هلوسة (hallucination) خصوصًا مع نصوص PDF الطويلة أو المصطلحات
+# المعقدة. نستعملو llama-3.3-70b-versatile: أدق بكثير، ومازال مجاني
+# ومتوفر عند Groq. الـ temperature نخفضوه لأن الترجمة تحتاج دقة/التزام
+# بالنص الأصلي، ماشي إبداع.
+# ============================================================
+
 llm = LLM(
-    model="llama-3.1-8b-instant",       # بدون بادئة "groq/" لتفادي تعارض litellm
+    model="llama-3.3-70b-versatile",
     api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1",  # Groq متوافق مع OpenAI API
-    temperature=0.3,
+    base_url="https://api.groq.com/openai/v1",
+    temperature=0.1,
     max_retries=3,
 )
 
