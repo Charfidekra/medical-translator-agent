@@ -17,8 +17,9 @@ if not GROQ_API_KEY:
     )
 
 llm = LLM(
-    model="groq/llama-3.1-8b-instant",
+    model="llama-3.1-8b-instant",       # بدون بادئة "groq/" لتفادي تعارض litellm
     api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1",  # Groq متوافق مع OpenAI API
     temperature=0.3,
     max_retries=3,
 )
