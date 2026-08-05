@@ -1,14 +1,13 @@
 import os
 from crewai import Agent, Crew, Process, Task, LLM
 
-# 1. إعداد الـ LLM مع تعطيل cache_breakpoint صراحة لمنع تعارض Groq
+# 1. إعداد الـ LLM الخاص بـ Groq بدون إضافة cache=False كقيمة بولينية
 llm = LLM(
     model="groq/llama-3.1-8b-instant",
-    api_key=os.environ.get("GROQ_API_KEY"),
-    cache=False  # تعطيل التخزين المؤقت لمنع إرسال cache_breakpoint
+    api_key=os.environ.get("GROQ_API_KEY")
 )
 
-# 2. تعريف العميل الطبي المترجم
+# 2. تعريف العميل الطبي المترجم مع إلغاء الكاش الخاص بالعميل
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate French medical content into clean, standard English without repeating headers.",
@@ -18,7 +17,7 @@ medical_translator = Agent(
     ),
     verbose=False,
     memory=False,
-    cache=False,  # تعطيل كاش Agent لمنع الخطأ
+    cache=False,  # تعطيل كاش الـ Agent
     llm=llm
 )
 
@@ -40,7 +39,7 @@ def translate_document(text_content: str) -> str:
         tasks=[translation_task],
         process=Process.sequential,
         memory=False,
-        cache=False  # تعطيل كاش الـ Crew لمنع إضافة cache_breakpoint
+        cache=False  # تعطيل كاش الـ Crew
     )
 
     result = crew.kickoff()
