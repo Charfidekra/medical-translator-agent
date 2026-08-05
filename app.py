@@ -26,22 +26,21 @@ def extract_page_text_with_ocr(page_img_np, reader) -> str:
 def add_watermark(page, text="by dekra charfi"):
     """إضافة علامة مائية بالاسم في مركز الصفحة"""
     rect = page.rect
-    # كتابة العلامة المائية بلون رمادي خفيف وشفاف في المنتصف
     page.insert_text(
         fitz.Point(rect.width / 4, rect.height / 2),
         text,
         fontsize=28,
         fontname="helv",
         color=(0.7, 0.7, 0.7),
-        rotate=45,  # مائلة بـ 45 درجة
-        overlay=True
+        rotate=45,
+        overlay=True,
     )
 
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
     """
-    تقوم هذه الدالة بضبط اتجاه الصفحات المقلوبة، وإنشاء صفحة أفقية مقسومة:
-    - النصف الأيسر: صورة الصفحة الأصلية (بعد تعديل دورانها).
+    تصحيح اتجاه الصفحات المقلوبة، وإنشاء صفحة أفقية مقسومة:
+    - النصف الأيسر: صورة الصفحة الأصلية.
     - النصف الأيمن: النص المترجم المنسق.
     مع إضافة العلامة المائية by dekra charfi.
     """
@@ -74,7 +73,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         else:
             translated_text = "لا يوجد نص مستخرج في هذه الصفحة."
 
-        all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
+        all_translated_texts.append(
+            f"--- Page {page_num + 1} ---\n{translated_text}"
+        )
 
         # 4. إعداد النصف المترجم الأيمن
         half_width = orig_page.rect.width
@@ -108,7 +109,9 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             spaceAfter=10,
         )
 
-        story = [Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)]
+        story = [
+            Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)
+        ]
 
         for para in translated_text.split("\n\n"):
             if para.strip():
@@ -125,17 +128,17 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
 
         # أ) رسم الصفحة الأصلية في النصف الأيسر
         combo_page.show_pdf_page(
-            fitz.Rect(0, 0, half_width, page_height),
-            orig_doc,
-            page_num
+            fitz.Rect(0, 0, half_width, page_height), orig_doc, page_num
         )
 
         # ب) رسم النص المترجم المنسق في النصف الأيمن
-        translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
+        translated_pdf_doc = fitz.open(
+            stream=buffer.getvalue(), filetype="pdf"
+        )
         combo_page.show_pdf_page(
             fitz.Rect(half_width, 0, total_width, page_height),
             translated_pdf_doc,
-            0
+            0,
         )
 
         # ج) إضافة العلامة المائية "by dekra charfi"
@@ -160,37 +163,75 @@ st.set_page_config(
 
 st.title("🩺 Medical Translator Agent")
 
-uploaded_file = st.file_uploader(
-    "قم برفع ملف الـ PDF الطبي (سيتم تصحيح اتجاه الصفحات المقلوبة وتقسيم الصفحات مع إضافة العلامة المائية)",
-    type=["pdf"]
-)
+# تقسيم الواجهة إلى تبويبين رئيسيين
+tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF"])
 
-if uploaded_file is not None:
-    st.success("تم استلام الملف بنجاح!")
+# ====================================================
+# الخانة الأولى: ترجمة نص مباشر
+# ====================================================
+with tab_text:
+    st.subheader("ترجمة النص الطبي مباشرة")
+    user_input_text = st.text_area(
+        label="أدخلي النص المراد ترجمته (فرنسي / إنجليزي):",
+        height=200,
+        placeholder="أكتبي أو ألصقي النص هنا...",
+    )
 
-    if st.button("ترجمة الملف وإصدار النسخة المقسومة"):
-        with st.spinner("جاري تصحيح الاتجاه، الترجمة، وإضافة العلامة المائية by dekra charfi..."):
-            try:
-                final_pdf_bytes, combined_text = generate_side_by_side_pdf(
-                    uploaded_file, translate_document
-                )
+    if st.button("ترجمة النص", key="btn_translate_text"):
+        if user_input_text.strip():
+            with st.spinner("جاري ترجمة النص بواسطة الطاقم الطبي الذكي..."):
+                try:
+                    result = translate_document(user_input_text)
+                    st.success("✅ تم الترجمة بنجاح!")
+                    st.subheader("النتيجة:")
+                    st.text_area(
+                        label="النص المترجم:",
+                        value=result,
+                        height=250,
+                    )
+                except Exception as e:
+                    st.error(f"حدث خطأ أثناء ترجمة النص: {e}")
+        else:
+            st.warning("يرجى إدخال نص أولاً قبل الضغط على زر الترجمة.")
 
-                st.success("✅ تم معالجة المستند بنجاح!")
+# ====================================================
+# الخانة الثانية: ترجمة ملف PDF
+# ====================================================
+with tab_file:
+    st.subheader("رفع وترجمة ملف الـ PDF")
+    uploaded_file = st.file_uploader(
+        "قم برفع ملف الـ PDF الطبي (سيتم تصحيح اتجاه الصفحات المقلوبة وتقسيم الصفحات مع إضافة العلامة المائية)",
+        type=["pdf"],
+    )
 
-                # 1. خانة لعرض النص المترجم مباشرة في الواجهة
-                st.subheader("📝 النص المترجم:")
-                st.text_area(
-                    label="معاينة النص الإنجليزي المترجم:",
-                    value=combined_text,
-                    height=300
-                )
+    if uploaded_file is not None:
+        st.success("تم استلام الملف بنجاح!")
 
-                # 2. زر تحميل ملف الـ PDF المترجم بالعرض والمحمي بالعلامة المائية
-                st.download_button(
-                    label="📥 تحميل الملف المترجم المقسوم (PDF)",
-                    data=final_pdf_bytes,
-                    file_name="side_by_side_translated.pdf",
-                    mime="application/pdf",
-                )
-            except Exception as e:
-                st.error(f"حدث خطأ أثناء معالجة المستند: {e}")
+        if st.button("ترجمة الملف وإصدار النسخة المقسومة", key="btn_translate_file"):
+            with st.spinner(
+                "جاري تصحيح الاتجاه، الترجمة، وإضافة العلامة المائية by dekra charfi..."
+            ):
+                try:
+                    final_pdf_bytes, combined_text = generate_side_by_side_pdf(
+                        uploaded_file, translate_document
+                    )
+
+                    st.success("✅ تم معالجة المستند بنجاح!")
+
+                    # معاينة النص المترجم
+                    st.subheader("📝 النص المترجم المستخرج من الملف:")
+                    st.text_area(
+                        label="معاينة النص الإنجليزي المترجم:",
+                        value=combined_text,
+                        height=300,
+                    )
+
+                    # زر تحميل PDF المقسوم
+                    st.download_button(
+                        label="📥 تحميل الملف المترجم المقسوم (PDF)",
+                        data=final_pdf_bytes,
+                        file_name="side_by_side_translated.pdf",
+                        mime="application/pdf",
+                    )
+                except Exception as e:
+                    st.error(f"حدث خطأ أثناء معالجة المستند: {e}")
