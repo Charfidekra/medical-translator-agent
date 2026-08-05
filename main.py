@@ -1,13 +1,14 @@
 import os
-from crewai import Agent, Crew, Process, Task, LLM
+from crewai import Agent, Crew, Process, Task
+from langchain_groq import ChatGroq
 
-# إعداد نموذج اللسان الذكي بـ llama-3.1-8b لتفادي الـ Rate Limit
-llm = LLM(
-    model="groq/llama-3.1-8b-instant",
+# 1. إعداد النموذج باستخدام ChatGroq لتجنب أخطاء الاستيراد (ImportError)
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
     api_key=os.environ.get("GROQ_API_KEY")
 )
 
-# 1. تعريف العميل الطبي المترجم
+# 2. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate medical documents accurately from French/Arabic to English while maintaining precise medical terminology.",
