@@ -1,14 +1,10 @@
 import os
 from crewai import Agent, Crew, Process, Task
-from langchain_groq import ChatGroq
 
-# 1. إعداد النموذج باستخدام ChatGroq لتجنب أخطاء الاستيراد (ImportError)
-llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    api_key=os.environ.get("GROQ_API_KEY")
-)
+# تعريف النموذج بطريقة مباشرة ومتوافقة مع جميع إصدارات CrewAI
+LLM_MODEL = "groq/llama-3.1-8b-instant"
 
-# 2. تعريف العميل الطبي المترجم
+# 1. تعريف العميل الطبي المترجم
 medical_translator = Agent(
     role="Senior Medical Translator",
     goal="Translate medical documents accurately from French/Arabic to English while maintaining precise medical terminology.",
@@ -19,7 +15,7 @@ medical_translator = Agent(
     ),
     verbose=False,
     memory=False,
-    llm=llm
+    llm=LLM_MODEL
 )
 
 def translate_document(text_content: str) -> str:
