@@ -1,49 +1,24 @@
 import os
-
-# تعطيل التخزين المؤقت على مستوى البيئة لمنع CrewAI من إضافة cache_breakpoint لـ Groq
-os.environ["LOOKUP_CACHE"] = "False"
-os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
-
-from crewai import Agent, Crew, Process, Task, LLM
-
-# 1. إعداد الـ LLM مع تعيين المعلمات بشكل مباشر
-llm = LLM(
-    model="groq/llama-3.1-8b-instant",
-    api_key=os.environ.get("GROQ_API_KEY")
-)
-
-# 2. تعريف العميل الطبي المترجم
-medical_translator = Agent(
-    role="Senior Medical Translator",
-    goal="Translate French medical content into clean, standard English without repeating headers.",
-    backstory=(
-        "You are an expert physician and medical translator. You provide direct, accurate English translations "
-        "of medical lecture notes, formulas, and terminology. Do not output conversational preamble or repeated headers."
-    ),
-    verbose=False,
-    memory=False,
-    llm=llm
-)
+from litellm import completion
 
 def translate_document(text_content: str) -> str:
-    """دالة الترجمة المباشرة التي يستدعيها app.py"""
+    """دالة الترجمة المباشرة باستدعاء Groq عبر litellm بدون مشاكل Caching"""
     
-    translation_task = Task(
-        description=(
-            f"Translate the following medical text directly into accurate, professional English.\n"
-            f"IMPORTANT: Output ONLY the translated text.\n\n"
-            f"Text to translate:\n{text_content}"
-        ),
-        expected_output="Direct English translation of the medical text only.",
-        agent=medical_translator
+    system_prompt = (
+        "You are a Senior Medical Translator. Translate the provided medical text into clear, academic, "
+        "and accurate English. Preserve all original formatting, structures, and terminology where applicable. "
+        "Output ONLY the translated text without any preamble, labels, or repeated headers."
     )
 
-    crew = Crew(
-        agents=[medical_translator],
-        tasks=[translation_task],
-        process=Process.sequential,
-        memory=False
-    )
-
-    result = crew.kickoff()
-    return str(result)
+    try:
+        response = completion(
+            model="groq/llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_content}
+            ],
+            api_key=os.environ.get("GROQ_API_KEY")
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"حدث خطأ أثناء الترجمة: {str(e)}"
