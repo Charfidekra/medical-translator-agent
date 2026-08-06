@@ -6,25 +6,36 @@ import streamlit as st
 from main import translate_document
 from PIL import Image
 
-# مكتبات تنسيق النص المترجم
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 @st.cache_resource
 def load_ocr_reader():
-    """تحميل EasyOCR وتخزينه في الذاكرة لضمان السرعة"""
+    """تحميل EasyOCR للغة الفرنسية والإنجليزية"""
     return easyocr.Reader(["fr", "en"], gpu=False)
 
 
-def extract_page_text_with_ocr(page_img_np, reader) -> str:
-    """استخراج النصوص من صورة الصفحة عبر EasyOCR"""
-    results = reader.readtext(page_img_np, detail=0)
-    return " ".join([t for t in results if t.strip()])
+def extract_page_text_with_ocr(img_pil, reader) -> str:
+    """استخراج النصوص من الصورة عبر OCR مع التأكد من الاتجاه الصحيح"""
+    img_np = np.array(img_pil)
+    results = reader.readtext(img_np, detail=0)
+    text = " ".join([t for t in results if t.strip()])
+    
+    # إذا كانت القراءة ضعيفة، نجرب تدوير الصورة 180 درجة لقراءتها في حال كانت مقلوبة
+    if len(text) < 15:
+        img_rotated = img_pil.rotate(180, expand=True)
+        img_rotated_np = np.array(img_rotated)
+        results_rotated = reader.readtext(img_rotated_np, detail=0)
+        text_rotated = " ".join([t for t in results_rotated if t.strip()])
+        if len(text_rotated) > len(text):
+            return text_rotated, img_rotated
+            
+    return text, img_pil
 
 
 def add_watermark(page, text="by dekra charfi"):
-    """إضافة علامة مائية بالاسم في مركز الصفحة بطريقة آمنة وبدون أخطاء"""
+    """إضافة العلامة المائية"""
     rect = page.rect
     watermark_rect = fitz.Rect(
         rect.width * 0.1,
@@ -32,7 +43,6 @@ def add_watermark(page, text="by dekra charfi"):
         rect.width * 0.9,
         rect.height * 0.55
     )
-    
     page.insert_textbox(
         watermark_rect,
         text,
@@ -45,10 +55,6 @@ def add_watermark(page, text="by dekra charfi"):
 
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
-    """
-    تعديل اتجاه الصفحات المقلوبة رأساً على عقب (180 درجة)، وقراءتها عبر OCR، 
-    ثم دمج الصفحات أفقياً وإضافة العلامة المائية by dekra charfi.
-    """
     reader = load_ocr_reader()
 
     uploaded_file.seek(0)
@@ -60,31 +66,21 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. استخراج صورة الصفحة
-        pix = orig_page.get_pixmap(dpi=150)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        # تحويل الصفحة لصورة
+        pix = orig_page.get_pixmap(dpi=120)
+        img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
 
-        # تصحيح تدوير الصفحة إذا كانت مصفوفة رأساً على عقب (Flip 180)
-        # نقوم بتدوير الصورة بـ 180 درجة تلقائياً ليصبح النص قائماً وصحيحاً لـ OCR
-        img_corrected = img.rotate(180, expand=True)
+        # استخراج النص وتصحيح الاتجاه تلقائياً
+        french_text, final_img_pil = extract_page_text_with_ocr(img_pil, reader)
 
-        # تحويل الصورة المصححة لـ Numpy Array لتمريرها لـ EasyOCR
-        img_np = np.array(img_corrected)
-
-        # 2. قراءة النص عبر EasyOCR بعد تعديل الدوران
-        french_text = extract_page_text_with_ocr(img_np, reader)
-
-        translated_text = ""
         if french_text.strip():
             translated_text = translator_func(french_text)
         else:
-            translated_text = "لا يوجد نص مستخرج في هذه الصفحة."
+            translated_text = "لم يتم العثور على نص واضح في هذه الصفحة."
 
-        all_translated_texts.append(
-            f"--- Page {page_num + 1} ---\n{translated_text}"
-        )
+        all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
 
-        # 3. إعداد أبعاد الجانب المترجم الأيمن
+        # بناء النصف الأيمن (الترجمة)
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
 
@@ -116,9 +112,7 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             spaceAfter=10,
         )
 
-        story = [
-            Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)
-        ]
+        story = [Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)]
 
         for para in translated_text.split("\n\n"):
             if para.strip():
@@ -129,29 +123,26 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         doc_temp.build(story)
         buffer.seek(0)
 
-        # 4. دمج الجانبين في صفحة أفقية واحدة (Landscape)
+        # دمج النصفين أفقياً
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
-        # أ) رسم صورة الصفحة الأصلية المصححة (المعدلة عدلياً) في النصف الأيسر
+        # رسم الصورة المصححة أيسر
         img_byte_arr = io.BytesIO()
-        img_corrected.save(img_byte_arr, format="PNG")
+        final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
             fitz.Rect(0, 0, half_width, page_height),
             stream=img_byte_arr.getvalue()
         )
 
-        # ب) رسم النص المترجم المنسق في النصف الأيمن
-        translated_pdf_doc = fitz.open(
-            stream=buffer.getvalue(), filetype="pdf"
-        )
+        # رسم النص المترجم أيمن
+        translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(half_width, 0, total_width, page_height),
             translated_pdf_doc,
             0,
         )
 
-        # ج) إضافة العلامة المائية "by dekra charfi"
         add_watermark(combo_page, "by dekra charfi")
 
     output_buffer = io.BytesIO()
@@ -167,76 +158,50 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
 # ----------------------------------------------------
 # واجهة Streamlit
 # ----------------------------------------------------
-st.set_page_config(
-    page_title="Medical Translator Agent", page_icon="🩺", layout="wide"
-)
+st.set_page_config(page_title="Medical Translator Agent", page_icon="🩺", layout="wide")
+st.title("🩺 Medical Translator Agent (Powered by Gemini)")
 
-st.title("🩺 Medical Translator Agent")
-
-# تقسيم الواجهة إلى تبويبين رئيسيين
 tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF"])
 
-# ====================================================
-# الخانة الأولى: ترجمة نص مباشر
-# ====================================================
 with tab_text:
     st.subheader("ترجمة النص الطبي مباشرة")
     user_input_text = st.text_area(
-        label="أدخلي النص المراد ترجمته (فرنسي / إنجليزي):",
+        label="أدخلي النص المراد ترجمته (فرنسي / عربي):",
         height=200,
         placeholder="أكتبي أو ألصقي النص هنا...",
     )
 
     if st.button("ترجمة النص", key="btn_translate_text"):
         if user_input_text.strip():
-            with st.spinner("جاري ترجمة النص بواسطة الطاقم الطبي الذكي..."):
+            with st.spinner("جاري ترجمة النص بواسطة Gemini..."):
                 try:
                     result = translate_document(user_input_text)
                     st.success("✅ تمت الترجمة بنجاح!")
-                    st.subheader("النتيجة:")
-                    st.text_area(
-                        label="النص المترجم:",
-                        value=result,
-                        height=250,
-                    )
+                    st.text_area(label="النص المترجم:", value=result, height=250)
                 except Exception as e:
-                    st.error(f"حدث خطأ أثناء ترجمة النص: {e}")
+                    st.error(f"حدث خطأ أثناء الترجمة: {e}")
         else:
-            st.warning("يرجى إدخال نص أولاً قبل الضغط على زر الترجمة.")
+            st.warning("يرجى إدخال نص أولاً.")
 
-# ====================================================
-# الخانة الثانية: ترجمة ملف PDF
-# ====================================================
 with tab_file:
     st.subheader("رفع وترجمة ملف الـ PDF")
     uploaded_file = st.file_uploader(
-        "قم برفع ملف الـ PDF الطبي (سيتم تصحيح اتجاه الصفحات المقلوبة وتقسيم الصفحات مع إضافة العلامة المائية)",
-        type=["pdf"],
+        "قم برفع ملف الـ PDF الطبي", type=["pdf"]
     )
 
     if uploaded_file is not None:
         st.success("تم استلام الملف بنجاح!")
 
         if st.button("ترجمة الملف وإصدار النسخة المقسومة", key="btn_translate_file"):
-            with st.spinner(
-                "جاري تصحيح الاتجاه، الترجمة، وإضافة العلامة المائية by dekra charfi..."
-            ):
+            with st.spinner("جاري معالجة الصفحات والترجمة بوساطة Gemini..."):
                 try:
                     final_pdf_bytes, combined_text = generate_side_by_side_pdf(
                         uploaded_file, translate_document
                     )
-
                     st.success("✅ تم معالجة المستند بنجاح!")
 
-                    # معاينة النص المترجم
-                    st.subheader("📝 النص المترجم المستخرج من الملف:")
-                    st.text_area(
-                        label="معاينة النص الإنجليزي المترجم:",
-                        value=combined_text,
-                        height=300,
-                    )
+                    st.text_area(label="معاينة النص الإنجليزي المترجم:", value=combined_text, height=300)
 
-                    # زر تحميل PDF المقسوم
                     st.download_button(
                         label="📥 تحميل الملف المترجم المقسوم (PDF)",
                         data=final_pdf_bytes,
@@ -244,4 +209,4 @@ with tab_file:
                         mime="application/pdf",
                     )
                 except Exception as e:
-                    st.error(f"حدث خطأ أثناء معالجة المستند: {e}")
+                    st.error(f"حدث خطأ أثناء المعالجة: {e}")
