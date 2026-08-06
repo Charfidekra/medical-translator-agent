@@ -4,6 +4,4 @@ easyocr
 numpy
 Pillow
 reportlab
-crewai
 litellm
-google-genai
