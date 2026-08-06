@@ -1,24 +1,46 @@
 import os
-from litellm import completion
+from crewai import Agent, Crew, Process, Task, LLM
+
+# 1. إعداد نموذج Gemini من Google عبر CrewAI
+# ملاحظة: احرصي على إضافة مفتاح GEMINI_API_KEY في Streamlit Secrets
+llm = LLM(
+    model="gemini/gemini-2.5-flash",
+    api_key=os.environ.get("GEMINI_API_KEY")
+)
+
+# 2. تعريف العميل الطبي المترجم
+medical_translator = Agent(
+    role="Senior Medical Translator",
+    goal="Translate French and Arabic medical documents accurately into clean, academic English while preserving precise medical terminology.",
+    backstory=(
+        "You are an expert physician and senior medical translator. You specialize in translating "
+        "complex medical concepts, anatomical terms, and clinical notes into precise, academic English, "
+        "ensuring all medical jargon and structures are reflected accurately without preamble or filler words."
+    ),
+    verbose=False,
+    memory=False,
+    llm=llm
+)
 
 def translate_document(text_content: str) -> str:
-    """دالة الترجمة المباشرة باستدعاء Groq عبر litellm بدون مشاكل Caching"""
+    """دالة الترجمة المباشرة التي يستدعيها app.py"""
     
-    system_prompt = (
-        "You are a Senior Medical Translator. Translate the provided medical text into clear, academic, "
-        "and accurate English. Preserve all original formatting, structures, and terminology where applicable. "
-        "Output ONLY the translated text without any preamble, labels, or repeated headers."
+    translation_task = Task(
+        description=(
+            f"Translate the following medical text directly into clear, academic, and accurate English.\n"
+            f"IMPORTANT: Provide ONLY the accurate translated English text. Do not add intro remarks, greetings, or repeated labels.\n\n"
+            f"Text to translate:\n{text_content}"
+        ),
+        expected_output="A direct, accurate English translation of the provided medical text.",
+        agent=medical_translator
     )
 
-    try:
-        response = completion(
-            model="groq/llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_content}
-            ],
-            api_key=os.environ.get("GROQ_API_KEY")
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"حدث خطأ أثناء الترجمة: {str(e)}"
+    crew = Crew(
+        agents=[medical_translator],
+        tasks=[translation_task],
+        process=Process.sequential,
+        memory=False
+    )
+
+    result = crew.kickoff()
+    return str(result)
