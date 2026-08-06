@@ -1,10 +1,9 @@
 import os
 from crewai import Agent, Crew, Process, Task, LLM
 
-# 1. إعداد نموذج Gemini من Google عبر CrewAI
-# ملاحظة: احرصي على إضافة مفتاح GEMINI_API_KEY في Streamlit Secrets
+# 1. إعداد نموذج Gemini المعتمد والمستقر
 llm = LLM(
-    model="gemini/gemini-2.5-flash",
+    model="gemini/gemini-1.5-flash",
     api_key=os.environ.get("GEMINI_API_KEY")
 )
 
