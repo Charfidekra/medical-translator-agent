@@ -2,7 +2,6 @@ import io
 import gc
 import os
 import shutil
-import concurrent.futures
 import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
@@ -54,7 +53,7 @@ def load_easyocr_reader():
 
 
 # ----------------------------------------------------
-# 1. واجهة الأذكار والتسبيحات التفاعلية
+# 1. واجهة الأذكار والتسبيحات أثناء المعالجة
 # ----------------------------------------------------
 AZKAR_HTML = """
 <!DOCTYPE html>
@@ -107,7 +106,7 @@ AZKAR_HTML = """
 </head>
 <body>
   <div class="card">
-    <div class="title">✨ جاري معالجة المستند واستخراج النصوص بسرعة... استغل الوقت بالذكر</div>
+    <div class="title">✨ جاري معالجة المستند واستخراج النصوص... استغل الوقت بالذكر</div>
     <div class="zikr" id="zikr-box">سُبْحَانَ اللَّهِ وَبِحَمْدِهِ ، سُبْحَانَ اللَّهِ الْعَظِيمِ</div>
     <div class="sub">يتغيّر الذكر تلقائياً كل بضع ثوانٍ</div>
   </div>
@@ -134,7 +133,7 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. تحسين معالجة الصور وOCR
+# 2. تنقية الصور واستخراج النصوص المتقدم
 # ----------------------------------------------------
 def clean_and_enhance_image(img_pil: Image.Image):
     if cv2 is not None:
@@ -151,7 +150,7 @@ def clean_and_enhance_image(img_pil: Image.Image):
 def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
     extracted_text = ""
     
-    # 1. التجربة عبر EasyOCR
+    # 1. EasyOCR
     reader = load_easyocr_reader()
     if reader is not None:
         try:
@@ -161,7 +160,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
         except Exception:
             extracted_text = ""
 
-    # 2. التجربة عبر Tesseract
+    # 2. Tesseract
     if not extracted_text and pytesseract is not None:
         try:
             processed_img = clean_and_enhance_image(img_pil)
@@ -176,7 +175,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
 
 
 # ----------------------------------------------------
-# 3. استخراج واستخراج سريع وموازي
+# 3. استخراج الصفحات وبناء Side-by-Side PDF
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -189,7 +188,7 @@ def extract_pages_from_file(uploaded_file):
             page = doc[page_num]
             text = page.get_text("text").strip()
             
-            # خفض DPI إلى 120 لسرعة خيالية وتقليل الحجم
+            # DPI 120 لسرعة المعالجة وتقليل حجم الميموري
             pix = page.get_pixmap(dpi=120)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
@@ -214,41 +213,27 @@ def extract_pages_from_file(uploaded_file):
     return pages_data
 
 
-def process_single_page(page_info, translator_func):
-    p_num, text, img_pil, w, h = page_info
-    if text and len(text) >= 10:
-        translated_text = translator_func(text)
-    else:
-        translated_text = process_deep_ocr(img_pil, translator_func)
-    return (p_num, translated_text, img_pil, w, h)
-
-
-def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
+def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
     pages_raw = extract_pages_from_file(uploaded_file)
     total_pages = len(pages_raw)
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("⚡ جاري تسريع معالجة الترجمة للصفحات...")
+    status_text.text("⚡ جاري استخراج النصوص وترجمتها...")
 
-    # معالجة موازية (Multithreading) لجميع الصفحات لزيادة السرعة
-    results = [None] * total_pages
-    completed_count = 0
+    results = []
+    for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
+        status_text.text(f"⚡ جاري ترجمة الصفحة {completed} من أصل {total_pages}...")
+        
+        if text and len(text) >= 10:
+            translated_text = translator_func(text)
+        else:
+            translated_text = process_deep_ocr(img_pil, translator_func)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_page = {executor.submit(process_single_page, page_data, translator_func): idx for idx, page_data in enumerate(pages_raw)}
-        for future in concurrent.futures.as_completed(future_to_page):
-            idx = future_to_page[future]
-            try:
-                results[idx] = future.result()
-            except Exception as e:
-                results[idx] = (idx, f"[حدث خطأ في الصفحة: {str(e)}]", pages_raw[idx][2], pages_raw[idx][3], pages_raw[idx][4])
-            
-            completed_count += 1
-            progress_bar.progress(completed_count / total_pages)
-            status_text.text(f"⚡ تم إنهاء ترجمة {completed_count} من أصل {total_pages} صفحات...")
+        results.append((p_num, translated_text, img_pil, w, h))
+        progress_bar.progress(completed / total_pages)
 
-    status_text.text("🎨 جاري رصف الصفحات المترجمة والنسخة الأصلية بمتوازيات بنفس الحجم...")
+    status_text.text("🎨 جاري رصف الصفحات المترجمة والنسخة الأصلية جنبًا إلى جنب بنفس الحجم...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -256,7 +241,6 @@ def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
     for page_num, translated_text, final_img_pil, orig_w, orig_h in results:
         all_translated_texts.append(f"--- Page/Slide {page_num + 1} ---\n{translated_text}")
 
-        # بناء الصفحة المترجمة بحجم مطابق تماماً للصفحة الأصلية
         buffer = io.BytesIO()
         doc_temp = SimpleDocTemplate(
             buffer,
@@ -299,11 +283,11 @@ def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
         doc_temp.build(story)
         buffer.seek(0)
 
-        # مضاعفة العرض بنسبة 50% / 50% لليمين واليسار متطابقين تماماً
+        # قسمة الصفحة متوازية متطابقة بنفس الحجم والارتفاع بالضبط
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # الجزء الأيسر: النص/الصورة الأصلية (50% من المساحة)
+        # الصفحة الأصلية (يسار)
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -311,7 +295,7 @@ def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # الجزء الأيمن: النص المترجم الموازي بنفس المقاس بالضبط (50% من المساحة)
+        # الصفحة المترجمة الموازية (يمين)
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
@@ -369,24 +353,22 @@ with tab_file:
         st.success("تم استلام الملف بنجاح!")
 
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
-            # عرض الأذكار بوضوح أثناء المعالجة
             azkar_container = st.empty()
             with azkar_container.container():
                 components.html(AZKAR_HTML, height=180)
 
             try:
-                final_pdf_bytes, combined_text = generate_side_by_side_pdf_fast(
+                final_pdf_bytes, combined_text = generate_side_by_side_pdf_safe(
                     uploaded_file, translate_document
                 )
                 
-                # تفريغ الأذكار فور انتهاء المعالجة
                 azkar_container.empty()
                 st.balloons()
                 st.success("🎉 اكتملت المعالجة والترجمة بنجاح!")
 
-                # عرض زر التحميل وقراءة النص مباشرة
                 st.markdown("### 📥 نتائج الترجمة والملف المترجم:")
                 
+                # زر التحميل الواضح مباشرة
                 st.download_button(
                     label="📥 اضغط هنا لتحميل الملف المترجم المقسوم (Side-By-Side PDF) - BY CHARFI DEKRA",
                     data=final_pdf_bytes,
