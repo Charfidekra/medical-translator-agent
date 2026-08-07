@@ -1,7 +1,10 @@
 streamlit
 PyMuPDF
-Pillow
-litellm
 python-pptx
-reportlab
+easyocr
+opencv-python-headless
+numpy
+Pillow
 pytesseract
+reportlab
+litellm
