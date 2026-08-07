@@ -103,32 +103,31 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. معالجة الصور واستخراج النص OCR
+# 2. معالجة الصور وقراءة OCR إذا لزم الأمر
 # ----------------------------------------------------
 def preprocess_image(img_pil: Image.Image) -> Image.Image:
-    """رفع التباين وتحويل الصورة لرسم رمادي بدقة أعلى للـ OCR"""
     gray = ImageOps.grayscale(img_pil)
     enhancer = ImageEnhance.Contrast(gray)
-    return enhancer.enhance(2.2)
+    return enhancer.enhance(2.0)
 
 
 def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
     extracted_text = ""
     try:
         processed_img = preprocess_image(img_pil)
-        config = r'--oem 3 --psm 6'
+        config = r'--oem 3 --psm 4'
         extracted_text = pytesseract.image_to_string(processed_img, lang="fra+eng", config=config).strip()
     except Exception:
         extracted_text = ""
 
     if not extracted_text or len(extracted_text) < 5:
-        return "[Graphical slide / Diagram with no extractable clinical text]"
+        return "[الصفحة تحتوي على مخططات/رسوم توضيحية بدون نص قابل للقراءة]"
 
     return translator_func(extracted_text)
 
 
 # ----------------------------------------------------
-# 3. استخراج الصفحات وتوليد Side-by-Side PDF
+# 3. استخراج النص مباشرة وبناء ملف Side-by-Side PDF
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -139,8 +138,11 @@ def extract_pages_from_file(uploaded_file):
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         for page_num in range(len(doc)):
             page = doc[page_num]
+            # استخراج النص المحتوى داخلياً مباشرة بدقة عالية
             text = page.get_text("text").strip()
-            pix = page.get_pixmap(dpi=200)
+            
+            # التقاط صورة الصفحة للعرض
+            pix = page.get_pixmap(dpi=150)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
             pages_data.append((page_num, text, img_pil, w, h))
@@ -169,20 +171,21 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري معالجة المستند واستخراج النص...")
+    status_text.text("🚀 جاري استخراج النص وترجمته أكاديمياً...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
-        if text and len(text) > 15:
+        # إذا تم استخراج نص حقيقي يتجاوز 10 أحرف نرسله مباشرة للترجمة
+        if text and len(text) > 10:
             translated_text = translator_func(text)
         else:
             translated_text = process_scanned_image_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم معالجة {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم ترجمة {completed} من أصل {total_pages} صفحات...")
 
-    status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وبناء الملف...")
+    status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وتنسيق الـ PDF...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -240,7 +243,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # الصفحة الأصلية
+        # جهة اليسار: الأصل
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -248,7 +251,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # الترجمة المقابلة
+        # جهة اليمين: الترجمة والعلامة المائية
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
