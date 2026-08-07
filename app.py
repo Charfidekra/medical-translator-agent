@@ -44,6 +44,7 @@ from main import translate_document
 # ----------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_easyocr_reader():
+    """تحميل EasyOCR عند الحاجة فقط دون إسقاط التطبيق"""
     if easyocr is not None:
         try:
             return easyocr.Reader(['fr', 'en'], gpu=False)
@@ -69,37 +70,37 @@ AZKAR_HTML = """
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 10px;
+    padding: 15px;
     margin: 0;
   }
   .card {
     background: #1e2530;
     border: 1px solid #313d4f;
     border-radius: 12px;
-    padding: 15px;
-    width: 95%;
-    max-width: 500px;
+    padding: 20px;
+    width: 90%;
+    max-width: 450px;
     text-align: center;
     box-shadow: 0 4px 15px rgba(0,0,0,0.3);
   }
   .title {
     color: #00e676;
-    font-size: 15px;
-    margin-bottom: 10px;
+    font-size: 16px;
+    margin-bottom: 12px;
     font-weight: bold;
   }
   .zikr {
-    font-size: 19px;
+    font-size: 20px;
     color: #ffffff;
-    min-height: 50px;
+    min-height: 60px;
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1.4;
-    margin-bottom: 8px;
+    line-height: 1.5;
+    margin-bottom: 10px;
   }
   .sub {
-    font-size: 11px;
+    font-size: 12px;
     color: #8b9bb4;
   }
 </style>
@@ -125,7 +126,7 @@ AZKAR_HTML = """
   setInterval(() => {
     idx = (idx + 1) % azkar.length;
     document.getElementById("zikr-box").innerText = azkar[idx];
-  }, 3000);
+  }, 4000);
 </script>
 </body>
 </html>
@@ -136,21 +137,23 @@ AZKAR_HTML = """
 # 2. تنقية الصور واستخراج النصوص المتقدم
 # ----------------------------------------------------
 def clean_and_enhance_image(img_pil: Image.Image):
+    """تحسين تباين الصورة وتنظيف العلامات المائية"""
     if cv2 is not None:
         open_cv_image = np.array(img_pil.convert('RGB')) 
         gray = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
         return clahe.apply(gray)
     else:
         gray = ImageOps.grayscale(img_pil)
         enhancer = ImageEnhance.Contrast(gray)
-        return enhancer.enhance(1.8)
+        return enhancer.enhance(2.0)
 
 
 def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
+    """محاولة الاستخراج متعددة المستويات (EasyOCR -> Tesseract)"""
     extracted_text = ""
     
-    # 1. EasyOCR
+    # 1. التجربة الأولى: عبر EasyOCR
     reader = load_easyocr_reader()
     if reader is not None:
         try:
@@ -160,7 +163,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
         except Exception:
             extracted_text = ""
 
-    # 2. Tesseract
+    # 2. التجربة الثانية: التراجع إلى Tesseract إذا فشل EasyOCR
     if not extracted_text and pytesseract is not None:
         try:
             processed_img = clean_and_enhance_image(img_pil)
@@ -188,8 +191,8 @@ def extract_pages_from_file(uploaded_file):
             page = doc[page_num]
             text = page.get_text("text").strip()
             
-            # DPI 120 لسرعة المعالجة وتقليل حجم الميموري
-            pix = page.get_pixmap(dpi=120)
+            # التقاط صورة عالية الوضوح 300 DPI
+            pix = page.get_pixmap(dpi=300)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
             pages_data.append((page_num, text, img_pil, w, h))
@@ -207,6 +210,8 @@ def extract_pages_from_file(uploaded_file):
                         if paragraph.text.strip():
                             text_runs.append(paragraph.text.strip())
             full_text = "\n".join(text_runs).strip()
+            
+            # إنشاء خلفية للصورة في PPTX
             img_pil = Image.new('RGB', (int(w), int(h)), color=(245, 247, 250))
             pages_data.append((idx, full_text, img_pil, w, h))
 
@@ -219,21 +224,22 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("⚡ جاري استخراج النصوص وترجمتها...")
+    status_text.text("🚀 جاري استخراج النصوص وترجمتها...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
-        status_text.text(f"⚡ جاري ترجمة الصفحة {completed} من أصل {total_pages}...")
-        
+        # 1. الاستخراج المباشر للنص الرقمي
         if text and len(text) >= 10:
             translated_text = translator_func(text)
         else:
+            # 2. الاستخراج العميق عبر OCR للصورة
             translated_text = process_deep_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
+        status_text.text(f"⚡ تم ترجمة {completed} من أصل {total_pages} صفحات...")
 
-    status_text.text("🎨 جاري رصف الصفحات المترجمة والنسخة الأصلية جنبًا إلى جنب بنفس الحجم...")
+    status_text.text("🎨 جاري إنشاء الـ PDF النهائي المقسوم وتطبيق العلامة المائية...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -245,7 +251,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         doc_temp = SimpleDocTemplate(
             buffer,
             pagesize=(orig_w, orig_h),
-            rightMargin=12, leftMargin=12, topMargin=12, bottomMargin=12,
+            rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15,
         )
 
         styles = getSampleStyleSheet()
@@ -255,12 +261,12 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         )
         title_style = ParagraphStyle(
             "SideTitleStyle", parent=styles["Heading2"],
-            fontName="Helvetica-Bold", fontSize=9, spaceAfter=4
+            fontName="Helvetica-Bold", fontSize=11, spaceAfter=4
         )
 
         char_count = len(translated_text)
-        f_size = 6 if char_count > 1500 else (7 if char_count > 800 else 8)
-        leading = f_size + 2
+        f_size = 9 if char_count > 2500 else (10 if char_count > 1200 else 11)
+        leading = f_size + 3
 
         dynamic_style = ParagraphStyle(
             "DynamicStyle", parent=styles["Normal"],
@@ -283,7 +289,6 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         doc_temp.build(story)
         buffer.seek(0)
 
-        # قسمة الصفحة متوازية متطابقة بنفس الحجم والارتفاع بالضبط
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
@@ -295,7 +300,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # الصفحة المترجمة الموازية (يمين)
+        # النص المترجم (يمين)
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
@@ -355,7 +360,7 @@ with tab_file:
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
             azkar_container = st.empty()
             with azkar_container.container():
-                components.html(AZKAR_HTML, height=180)
+                components.html(AZKAR_HTML, height=200)
 
             try:
                 final_pdf_bytes, combined_text = generate_side_by_side_pdf_safe(
@@ -363,24 +368,16 @@ with tab_file:
                 )
                 
                 azkar_container.empty()
-                st.balloons()
                 st.success("🎉 اكتملت المعالجة والترجمة بنجاح!")
 
-                st.markdown("### 📥 نتائج الترجمة والملف المترجم:")
-                
-                # زر التحميل الواضح مباشرة
+                st.text_area(label="معاينة النص المترجم والمصحح:", value=combined_text, height=250)
+
                 st.download_button(
-                    label="📥 اضغط هنا لتحميل الملف المترجم المقسوم (Side-By-Side PDF) - BY CHARFI DEKRA",
+                    label="📥 تحميل الملف المترجم المقسوم (PDF) - BY CHARFI DEKRA",
                     data=final_pdf_bytes,
                     file_name=f"translated_BY_CHARFI_DEKRA_{uploaded_file.name.split('.')[0]}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
                 )
-
-                st.markdown("---")
-                st.subheader("📖 لقراءة النص المترجم والمكافئ كاملاً:")
-                st.text_area(label="النص المترجم والمصحح كاملاً:", value=combined_text, height=350)
-
             except Exception as e:
                 azkar_container.empty()
                 st.error(f"حدث خطأ أثناء المعالجة: {e}")
