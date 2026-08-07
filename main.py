@@ -16,8 +16,11 @@ def translate_document(text: str) -> str:
         return "[لا يوجد نص قابل للترجمة في هذه الصفحة]"
 
     # 1. استرجاع المصطلحات ذات الصلة من قاعدة بيانات ChromaDB
+    # نستعملو غير جزء من النص (أول ~400 حرف) باش نسرعو البحث الدلالي
+    # بلا ما نأثرو كبير على جودة المصطلحات المسترجعة
     try:
-        relevant_terms = query_relevant_terms(text)
+        query_snippet = text[:400]
+        relevant_terms = query_relevant_terms(query_snippet)
     except Exception as e:
         relevant_terms = f"(تعذر استرجاع المصطلحات: {e})"
 
