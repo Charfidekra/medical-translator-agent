@@ -1,5 +1,6 @@
 import io
 import gc
+from concurrent.futures import ThreadPoolExecutor
 import fitz  # PyMuPDF
 import streamlit as st
 from PIL import Image
@@ -9,73 +10,101 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
-def extract_lightweight_text(page) -> tuple[str, Image.Image]:
-    """استخراج نص سريع خفيف جداً على الذاكرة والـ CPU"""
-    direct_text = page.get_text("text").strip()
-    pix = page.get_pixmap(dpi=120)  # تقليل الـ DPI قليلاً لتوفير ذاكرة الهاتف
+def process_single_page(args):
+    """معالجة صفحة واحدة (استخراج + ترجمة)"""
+    page_num, page_bytes, translator_func = args
+    doc = fitz.open(stream=page_bytes, filetype="pdf")
+    orig_page = doc[0]
+
+    # 1. استخراج النص M
+    extracted_text = orig_page.get_text("text").strip()
+    
+    pix = orig_page.get_pixmap(dpi=120)
     img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
-    return direct_text, img_pil
+
+    # 2. الترجمة
+    if extracted_text:
+        translated_text = translator_func(extracted_text)
+    else:
+        translated_text = "No selectable text found on this page."
+
+    doc.close()
+    return page_num, translated_text, img_pil, orig_page.rect.width, orig_page.rect.height
 
 
-def generate_side_by_side_pdf(uploaded_file, translator_func):
+def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
     uploaded_file.seek(0)
     orig_doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    new_doc = fitz.open()
+    total_pages = len(orig_doc)
 
+    # تحضير المهام للتوازي
+    tasks = []
+    for page_num in range(total_pages):
+        # استخراج الصفحة كـ PDF مستقل صغير
+        single_doc = fitz.open()
+        single_doc.insert_pdf(orig_doc, from_page=page_num, to_page=page_num)
+        page_bytes = single_doc.write()
+        single_doc.close()
+        tasks.append((page_num, page_bytes, translator_func))
+
+    orig_doc.close()
+
+    # شريط تقدم تفاعلي يريح المستخدم
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    status_text.text("🚀 جاري معالجة وصفحات الملف بالتوازي...")
+
+    results = [None] * total_pages
+
+    # تنفيذ الترجمة لجميع الصفحات بالتوازي (Parallel Execution)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(process_single_page, task) for task in tasks]
+        completed = 0
+        for future in futures:
+            p_num, trans_text, img_pil, width, height = future.result()
+            results[p_num] = (trans_text, img_pil, width, height)
+            completed += 1
+            progress_bar.progress(completed / total_pages)
+            status_text.text(f"⚡ تم إكمال ترجمة {completed} من أصل {total_pages} صفحات...")
+
+    status_text.text("🎨 جاري تجميع المستند النهائي...")
+
+    # بناء ملف الـ PDF النهائي
+    new_doc = fitz.open()
     all_translated_texts = []
 
-    for page_num in range(len(orig_doc)):
-        orig_page = orig_doc[page_num]
-
-        extracted_text, final_img_pil = extract_lightweight_text(orig_page)
-
-        if extracted_text.strip():
-            translated_text = translator_func(extracted_text)
-        else:
-            translated_text = "No selectable text found on this page (scanned page)."
-
+    for page_num, (translated_text, final_img_pil, half_width, page_height) in enumerate(results):
         all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
-
-        half_width = orig_page.rect.width
-        page_height = orig_page.rect.height
 
         buffer = io.BytesIO()
         doc_temp = SimpleDocTemplate(
             buffer,
             pagesize=(half_width, page_height),
-            rightMargin=20,
-            leftMargin=20,
-            topMargin=25,
-            bottomMargin=25,
+            rightMargin=18,
+            leftMargin=18,
+            topMargin=20,
+            bottomMargin=20,
         )
 
         styles = getSampleStyleSheet()
         
         watermark_style = ParagraphStyle(
-            "WatermarkStyle",
-            parent=styles["Normal"],
-            fontName="Helvetica-Bold",
-            fontSize=8,
-            textColor="#888888",
-            alignment=1,
-            spaceAfter=6,
+            "WatermarkStyle", parent=styles["Normal"],
+            fontName="Helvetica-Bold", fontSize=7, textColor="#777777", alignment=1, spaceAfter=4
         )
-
-        custom_style = ParagraphStyle(
-            "SideBySideStyle",
-            parent=styles["Normal"],
-            fontName="Helvetica",
-            fontSize=9,
-            leading=13,
-            spaceAfter=8,
-        )
-
         title_style = ParagraphStyle(
-            "SideTitleStyle",
-            parent=styles["Heading2"],
-            fontName="Helvetica-Bold",
-            fontSize=11,
-            spaceAfter=6,
+            "SideTitleStyle", parent=styles["Heading2"],
+            fontName="Helvetica-Bold", fontSize=10, spaceAfter=6
+        )
+
+        # حساب حجم الخط تلقائياً ليطابق المساحة
+        char_count = len(translated_text)
+        f_size = 7 if char_count > 1500 else (8 if char_count > 800 else 9)
+        leading = f_size + 3
+
+        dynamic_style = ParagraphStyle(
+            "DynamicStyle", parent=styles["Normal"],
+            fontName="Helvetica", fontSize=f_size, leading=leading, spaceAfter=4
         )
 
         story = [
@@ -88,10 +117,10 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         for para in translated_text.split("\n\n"):
             if para.strip():
                 formatted = para.strip().replace("\n", "<br/>")
-                story.append(Paragraph(formatted, custom_style))
-                story.append(Spacer(1, 4))
+                story.append(Paragraph(formatted, dynamic_style))
+                story.append(Spacer(1, 2))
 
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
         story.append(Paragraph("BY DEKRA CHARFI", watermark_style))
 
         doc_temp.build(story)
@@ -110,77 +139,17 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(half_width, 0, total_width, page_height),
-            translated_pdf_doc,
-            0,
+            translated_pdf_doc, 0
         )
-        
-        # تفريغ الذاكرة
-        gc.collect()
 
     output_buffer = io.BytesIO()
     new_doc.save(output_buffer)
     new_doc.close()
-    orig_doc.close()
+
+    progress_bar.empty()
+    status_text.empty()
 
     output_buffer.seek(0)
     full_text_combined = "\n\n".join(all_translated_texts)
     return output_buffer.getvalue(), full_text_combined
-
-
-# ----------------------------------------------------
-# واجهة التطبيق
-# ----------------------------------------------------
-st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
-st.title("🩺 MEDICAL TRANSLATOR AGENT")
-st.caption("Advanced Medical & Population Genetics Translation Engine | **BY DEKRA CHARFI**")
-
-tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF (مع العلامة المائية)"])
-
-with tab_text:
-    st.subheader("ترجمة النص الطبي المباشر وتصحيح المعادلات")
-    user_input_text = st.text_area(
-        label="أدخلي النص المراد ترجمته (فرنسي / عربي):",
-        height=200,
-        placeholder="أكتبي أو ألصقي النص هنا...",
-    )
-
-    if st.button("ترجمة النص", key="btn_translate_text"):
-        if user_input_text.strip():
-            with st.spinner("جاري الترجمة والتصحيح الأكاديمي بواسطة MEDICAL TRANSLATOR AGENT..."):
-                result = translate_document(user_input_text)
-                if result.startswith("Error") or result.startswith("Translation Service Error"):
-                    st.error(result)
-                else:
-                    st.success("✅ تمت الترجمة بنجاح!")
-                    st.text_area(label="النص المترجم والمصحح:", value=result, height=250)
-        else:
-            st.warning("يرجى إدخال نص أولاً.")
-
-with tab_file:
-    st.subheader("رفع وترجمة ملف الـ PDF")
-    uploaded_file = st.file_uploader(
-        "قم برفع ملف الـ PDF الطبي/الجيني", type=["pdf"]
-    )
-
-    if uploaded_file is not None:
-        st.success("تم استلام الملف بنجاح!")
-
-        if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
-            with st.spinner("جاري الترجمة وتوليد الـ PDF..."):
-                try:
-                    final_pdf_bytes, combined_text = generate_side_by_side_pdf(
-                        uploaded_file, translate_document
-                    )
-                    st.success("✅ تم معالجة المستند بنجاح!")
-
-                    st.text_area(label="معاينة النص الإنجليزي المترجم والمصحح:", value=combined_text, height=300)
-
-                    st.download_button(
-                        label="📥 تحميل الملف المترجم (PDF) - BY DEKRA CHARFI",
-                        data=final_pdf_bytes,
-                        file_name="translated_genetics_BY_DEKRA_CHARFI.pdf",
-                        mime="application/pdf",
-                    )
-                except Exception as e:
-                    st.error(f"حدث خطأ أثناء المعالجة: {e}")
    
