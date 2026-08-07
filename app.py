@@ -11,7 +11,7 @@ import pytesseract
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from main import translate_document  # دالة الترجمة من ملف main.py
+from main import translate_document
 
 
 # ----------------------------------------------------
@@ -103,39 +103,32 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. استخراج النص بالـ OCR مع تحسين الصورة
+# 2. معالجة الصور واستخراج النص OCR
 # ----------------------------------------------------
-def preprocess_image_for_ocr(img_pil: Image.Image) -> Image.Image:
-    """تحسين تباين الصورة لرفع دقة التعرف على النصوص"""
-    gray_img = ImageOps.grayscale(img_pil)
-    enhancer = ImageEnhance.Contrast(gray_img)
-    return enhancer.enhance(2.0)
+def preprocess_image(img_pil: Image.Image) -> Image.Image:
+    """رفع التباين وتحويل الصورة لرسم رمادي بدقة أعلى للـ OCR"""
+    gray = ImageOps.grayscale(img_pil)
+    enhancer = ImageEnhance.Contrast(gray)
+    return enhancer.enhance(2.2)
 
 
 def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
-    """قراءة النص من الصورة وترجمته آلياً"""
     extracted_text = ""
     try:
-        processed_img = preprocess_image_for_ocr(img_pil)
-        custom_config = r'--oem 3 --psm 6'
-        extracted_text = pytesseract.image_to_string(
-            processed_img, lang="fra+eng", config=custom_config
-        ).strip()
+        processed_img = preprocess_image(img_pil)
+        config = r'--oem 3 --psm 6'
+        extracted_text = pytesseract.image_to_string(processed_img, lang="fra+eng", config=config).strip()
     except Exception:
         extracted_text = ""
 
     if not extracted_text or len(extracted_text) < 5:
-        # إرسال طلب ترجمة مبسط للنموذج في حال كانت الصورة عبارة عن رسم أو مخطط
-        return translator_func("Translate and explain the medical concepts depicted in this page.")
+        return "[Graphical slide / Diagram with no extractable clinical text]"
 
-    try:
-        return translator_func(extracted_text)
-    except Exception as e:
-        return f"[Translation Error: {str(e)}]"
+    return translator_func(extracted_text)
 
 
 # ----------------------------------------------------
-# 3. استخراج الصفحات ومعالجتها
+# 3. استخراج الصفحات وتوليد Side-by-Side PDF
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -176,21 +169,18 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري معالجة الصفحات وترجمتها...")
+    status_text.text("🚀 جاري معالجة المستند واستخراج النص...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
         if text and len(text) > 15:
-            try:
-                translated_text = translator_func(text)
-            except Exception as e:
-                translated_text = f"[Translation Error: {str(e)}]"
+            translated_text = translator_func(text)
         else:
             translated_text = process_scanned_image_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم إكمال {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم معالجة {completed} من أصل {total_pages} صفحات...")
 
     status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وبناء الملف...")
 
@@ -250,6 +240,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
+        # الصفحة الأصلية
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -257,6 +248,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
+        # الترجمة المقابلة
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
@@ -277,7 +269,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# 4. الواجهة الرئيسية
+# 4. واجهة التطبيق
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
@@ -298,11 +290,8 @@ with tab_text:
         if user_input_text.strip():
             with st.spinner("جاري الترجمة والتصحيح الأكاديمي..."):
                 result = translate_document(user_input_text)
-                if result.startswith("Error") or result.startswith("Translation Service Error"):
-                    st.error(result)
-                else:
-                    st.success("✅ تمت الترجمة بنجاح!")
-                    st.text_area(label="النص المترجم والمصحح:", value=result, height=250)
+                st.success("✅ تمت الترجمة بنجاح!")
+                st.text_area(label="النص المترجم والمصحح:", value=result, height=250)
         else:
             st.warning("يرجى إدخال نص أولاً.")
 
