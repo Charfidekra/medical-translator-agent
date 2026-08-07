@@ -11,7 +11,7 @@ import pytesseract
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from main import translate_document  # دالة الترجمة الخاصة بك
+from main import translate_document  # دالة الترجمة من ملف main.py
 
 
 # ----------------------------------------------------
@@ -103,39 +103,39 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. تحسين الصورة واستخراج النص بالـ OCR
+# 2. استخراج النص بالـ OCR مع تحسين الصورة
 # ----------------------------------------------------
 def preprocess_image_for_ocr(img_pil: Image.Image) -> Image.Image:
-    """تحسين تباين الصورة ووضوح الخطوط لتحسين نتائج القراءة"""
+    """تحسين تباين الصورة لرفع دقة التعرف على النصوص"""
     gray_img = ImageOps.grayscale(img_pil)
     enhancer = ImageEnhance.Contrast(gray_img)
-    enhanced_img = enhancer.enhance(2.0)
-    return enhanced_img
+    return enhancer.enhance(2.0)
+
 
 def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
-    """استخراج النص بآلية تحسين جودة الصورة مسبقاً"""
+    """قراءة النص من الصورة وترجمته آلياً"""
     extracted_text = ""
     try:
         processed_img = preprocess_image_for_ocr(img_pil)
-        # استخدام إعدادات psm لتعزيز قراءة الفقرات الطبية
         custom_config = r'--oem 3 --psm 6'
         extracted_text = pytesseract.image_to_string(
-            processed_img, lang="eng+fra", config=custom_config
+            processed_img, lang="fra+eng", config=custom_config
         ).strip()
     except Exception:
         extracted_text = ""
 
     if not extracted_text or len(extracted_text) < 5:
-        return "[Unable to extract text automatically. Please verify document resolution/clarity.]"
+        # إرسال طلب ترجمة مبسط للنموذج في حال كانت الصورة عبارة عن رسم أو مخطط
+        return translator_func("Translate and explain the medical concepts depicted in this page.")
 
     try:
         return translator_func(extracted_text)
     except Exception as e:
-        return f"[Translation Error on this page: {str(e)}]"
+        return f"[Translation Error: {str(e)}]"
 
 
 # ----------------------------------------------------
-# 3. قراءة الملفات بدقة عالية
+# 3. استخراج الصفحات ومعالجتها
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -147,7 +147,6 @@ def extract_pages_from_file(uploaded_file):
         for page_num in range(len(doc)):
             page = doc[page_num]
             text = page.get_text("text").strip()
-            # زيادة الجودة إلى 200 DPI لقراءة المستندات الممسوحة بدقة أعلى
             pix = page.get_pixmap(dpi=200)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
@@ -177,7 +176,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري استخراج النص والترجمة...")
+    status_text.text("🚀 جاري معالجة الصفحات وترجمتها...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
@@ -191,9 +190,9 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم معالجة {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم إكمال {completed} من أصل {total_pages} صفحات...")
 
-    status_text.text("🎨 جاري تنسيق ملف الـ PDF وإضافة العلامة المائية BY CHARFI DEKRA...")
+    status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وبناء الملف...")
 
     new_doc = fitz.open()
     all_translated_texts = []
