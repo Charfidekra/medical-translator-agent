@@ -5,7 +5,7 @@ import shutil
 import fitz  # PyMuPDF
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from pptx import Presentation
 import pytesseract
 
@@ -103,31 +103,46 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. معالجة الصور وقراءة OCR إذا لزم الأمر
+# 2. تحسين معالجة الصور وقراءة OCR المتطورة
 # ----------------------------------------------------
-def preprocess_image(img_pil: Image.Image) -> Image.Image:
+def preprocess_image_advanced(img_pil: Image.Image) -> Image.Image:
+    """تحسين الصورة لإزالة التشويش والعلامات المائية وإبراز النصوص"""
     gray = ImageOps.grayscale(img_pil)
+    # زيادة التباين لمحو الخلفيات الباهتة
     enhancer = ImageEnhance.Contrast(gray)
-    return enhancer.enhance(2.0)
+    enhanced = enhancer.enhance(2.5)
+    # تصفية التشويش
+    filtered = enhanced.filter(ImageFilter.SHARPEN)
+    return filtered
 
 
 def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
     extracted_text = ""
     try:
-        processed_img = preprocess_image(img_pil)
-        config = r'--oem 3 --psm 4'
-        extracted_text = pytesseract.image_to_string(processed_img, lang="fra+eng", config=config).strip()
+        processed_img = preprocess_image_advanced(img_pil)
+        
+        # تجربة إعدادين مختلفين لـ Tesseract للحصول على أفضل قراءة للنصوص المعقدة
+        configs = [r'--oem 3 --psm 6', r'--oem 3 --psm 3']
+        for cfg in configs:
+            text_candidate = pytesseract.image_to_string(processed_img, lang="fra+eng", config=cfg).strip()
+            if len(text_candidate) > len(extracted_text):
+                extracted_text = text_candidate
+
     except Exception:
         extracted_text = ""
 
-    if not extracted_text or len(extracted_text) < 5:
+    # إزالة الأسطر الفارغة أو المسافات المتكررة
+    cleaned_lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
+    extracted_text = "\n".join(cleaned_lines)
+
+    if not extracted_text or len(extracted_text) < 3:
         return "[الصفحة تحتوي على مخططات/رسوم توضيحية بدون نص قابل للقراءة]"
 
     return translator_func(extracted_text)
 
 
 # ----------------------------------------------------
-# 3. استخراج النص مباشرة وبناء ملف Side-by-Side PDF
+# 3. استخراج النص وبناء ملف Side-by-Side PDF
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -138,11 +153,11 @@ def extract_pages_from_file(uploaded_file):
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         for page_num in range(len(doc)):
             page = doc[page_num]
-            # استخراج النص المحتوى داخلياً مباشرة بدقة عالية
+            # استخراج النص المحتوى داخلياً مباشرة
             text = page.get_text("text").strip()
             
-            # التقاط صورة الصفحة للعرض
-            pix = page.get_pixmap(dpi=150)
+            # رفع بدقة الصورة إلى 300 DPI لضمان نجاح OCR إذا كانت الصورة ممسوحة ضوئياً
+            pix = page.get_pixmap(dpi=300)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
             pages_data.append((page_num, text, img_pil, w, h))
@@ -157,7 +172,8 @@ def extract_pages_from_file(uploaded_file):
             for shape in slide.shapes:
                 if shape.has_text_frame:
                     for paragraph in shape.text_frame.paragraphs:
-                        text_runs.append(paragraph.text)
+                        if paragraph.text.strip():
+                            text_runs.append(paragraph.text.strip())
             full_text = "\n".join(text_runs).strip()
             img_pil = Image.new('RGB', (int(w), int(h)), color=(245, 247, 250))
             pages_data.append((idx, full_text, img_pil, w, h))
@@ -175,15 +191,15 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
-        # إذا تم استخراج نص حقيقي يتجاوز 10 أحرف نرسله مباشرة للترجمة
-        if text and len(text) > 10:
+        # استخدام النص المستخرج بـ PyMuPDF أو اللجوء إلى OCR المحسّن
+        if text and len(text) >= 5:
             translated_text = translator_func(text)
         else:
             translated_text = process_scanned_image_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم ترجمة {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم معالجة وترجمة {completed} من أصل {total_pages} صفحات...")
 
     status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وتنسيق الـ PDF...")
 
@@ -243,7 +259,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # جهة اليسار: الأصل
+        # جهة اليسار: الصفحة الأصلية
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
