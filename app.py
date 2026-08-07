@@ -1,18 +1,20 @@
 import io
 import gc
+import base64
+import os
 from concurrent.futures import ThreadPoolExecutor
 import fitz  # PyMuPDF
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
-from main import translate_document
+from litellm import completion
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 
 # ----------------------------------------------------
-# 1. كود لعبة الدودة (Snake Game) خفيفة ومستقلة
+# 1. كود لعبة الدودة (Snake Game)
 # ----------------------------------------------------
 SNAKE_GAME_HTML = """
 <!DOCTYPE html>
@@ -58,18 +60,10 @@ SNAKE_GAME_HTML = """
   let score = 0;
 
   let snake = {
-    x: 160,
-    y: 120,
-    dx: grid,
-    dy: 0,
-    cells: [],
-    maxCells: 4
+    x: 160, y: 120, dx: grid, dy: 0, cells: [], maxCells: 4
   };
 
-  let apple = {
-    x: 320 - grid * 3,
-    y: 240 - grid * 3
-  };
+  let apple = { x: 320 - grid * 3, y: 240 - grid * 3 };
 
   function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min)) + min;
@@ -77,8 +71,6 @@ SNAKE_GAME_HTML = """
 
   function gameLoop() {
     requestAnimationFrame(gameLoop);
-
-    // ابطاء سرعة اللعبة لتكون سلسة (12 FPS)
     if (++count < 5) return;
     count = 0;
 
@@ -87,7 +79,6 @@ SNAKE_GAME_HTML = """
     snake.x += snake.dx;
     snake.y += snake.dy;
 
-    // العبور من الجدران
     if (snake.x < 0) snake.x = canvas.width - grid;
     else if (snake.x >= canvas.width) snake.x = 0;
 
@@ -100,16 +91,13 @@ SNAKE_GAME_HTML = """
       snake.cells.pop();
     }
 
-    // رسم التفاحة
     ctx.fillStyle = '#ff4b4b';
     ctx.fillRect(apple.x, apple.y, grid-1, grid-1);
 
-    // رسم الثعبان
     ctx.fillStyle = '#00e676';
     snake.cells.forEach(function(cell, index) {
       ctx.fillRect(cell.x, cell.y, grid-1, grid-1);
 
-      // اكل التفاحة
       if (cell.x === apple.x && cell.y === apple.y) {
         snake.maxCells++;
         score += 10;
@@ -117,47 +105,28 @@ SNAKE_GAME_HTML = """
         apple.y = getRandomInt(0, canvas.height / grid) * grid;
       }
 
-      // الاصطدام بالذيل
       for (let i = index + 1; i < snake.cells.length; i++) {
         if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
-          snake.x = 160;
-          snake.y = 120;
-          snake.cells = [];
-          snake.maxCells = 4;
-          snake.dx = grid;
-          snake.dy = 0;
-          score = 0;
+          snake.x = 160; snake.y = 120; snake.cells = []; snake.maxCells = 4;
+          snake.dx = grid; snake.dy = 0; score = 0;
           apple.x = getRandomInt(0, canvas.width / grid) * grid;
           apple.y = getRandomInt(0, canvas.height / grid) * grid;
         }
       }
     });
 
-    // عرض النتيجة
     ctx.fillStyle = '#ffffff';
     ctx.font = '12px Arial';
     ctx.fillText('النتيجة: ' + score, 10, 20);
   }
 
-  // التحكم بالأسهم مع منع التمرير
   window.addEventListener('keydown', function(e) {
-    if ([37, 38, 39, 40].indexOf(e.keyCode) > -1) {
-      e.preventDefault();
-    }
+    if ([37, 38, 39, 40].indexOf(e.keyCode) > -1) e.preventDefault();
 
-    if (e.which === 37 && snake.dx === 0) {
-      snake.dx = -grid;
-      snake.dy = 0;
-    } else if (e.which === 38 && snake.dy === 0) {
-      snake.dy = -grid;
-      snake.dx = 0;
-    } else if (e.which === 39 && snake.dx === 0) {
-      snake.dx = grid;
-      snake.dy = 0;
-    } else if (e.which === 40 && snake.dy === 0) {
-      snake.dy = grid;
-      snake.dx = 0;
-    }
+    if (e.which === 37 && snake.dx === 0) { snake.dx = -grid; snake.dy = 0; }
+    else if (e.which === 38 && snake.dy === 0) { snake.dy = -grid; snake.dx = 0; }
+    else if (e.which === 39 && snake.dx === 0) { snake.dx = grid; snake.dy = 0; }
+    else if (e.which === 40 && snake.dy === 0) { snake.dy = grid; snake.dx = 0; }
   });
 
   requestAnimationFrame(gameLoop);
@@ -168,7 +137,53 @@ SNAKE_GAME_HTML = """
 
 
 # ----------------------------------------------------
-# 2. معالجة الصفحات بأمان وسرعة عالية
+# 2. الترجمة عبر الرؤية البصرية (للمستندات الممسوحة ضوئياً)
+# ----------------------------------------------------
+def translate_scanned_image(img_pil: Image.Image) -> str:
+    """استخراج النص والترجمة مباشرة من الصور عبر Groq Vision"""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return "Error: GROQ_API_KEY missing."
+
+    # تحويل الصورة إلى Base64
+    buffered = io.BytesIO()
+    img_pil.save(buffered, format="PNG")
+    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    system_prompt = (
+        "You are an elite Clinical Genetics Professor and Expert Medical Translator.\n"
+        "Transcribe and translate all text present in this medical image/page into highly accurate academic English.\n"
+        "STRICT RULES:\n"
+        "1. Preserve all clinical and genetic terms (Hardy-Weinberg genotypes AA, Aa, aa).\n"
+        "2. Do not omit any medical content.\n"
+        "3. Output ONLY the translated academic English text without preamble."
+    )
+
+    try:
+        response = completion(
+            model="groq/llama-3.2-11b-vision-preview",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": system_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img_base64}"}
+                        }
+                    ]
+                }
+            ],
+            temperature=0.1,
+            api_key=api_key
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Vision Translation Error: {str(e)}"
+
+
+# ----------------------------------------------------
+# 3. معالجة الصفحات الذكية (نص عادي + Scan)
 # ----------------------------------------------------
 def process_single_page(args):
     page_num, page_bytes, translator_func = args
@@ -178,20 +193,22 @@ def process_single_page(args):
 
     extracted_text = orig_page.get_text("text").strip()
     
-    # dpi=100 لخفة هائلة على الـ RAM وسرعة فائقة
-    pix = orig_page.get_pixmap(dpi=100)
+    # دقة متوازنة وممتازة
+    pix = orig_page.get_pixmap(dpi=120)
     img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
 
-    if extracted_text:
+    # إذا كان النص موجوداً رقمياً نستخدم الترجمة السريعة، وإذا كان Scan نستخدم نموذج الرؤية Vision
+    if extracted_text and len(extracted_text) > 20:
         translated_text = translator_func(extracted_text)
     else:
-        translated_text = "No selectable text found on this page."
+        # حل مشكلة Scan: معالجة الصورة بـ Vision Model
+        translated_text = translate_scanned_image(img_pil)
 
     width = orig_page.rect.width
     height = orig_page.rect.height
     
     doc.close()
-    gc.collect()  # تفريغ الذاكرة فوراً
+    gc.collect()
 
     return page_num, translated_text, img_pil, width, height
 
@@ -213,11 +230,11 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري معالجة المستند وتوليد الصفحات...")
+    status_text.text("🚀 جاري معالجة المستند وقراءة الصفحات (بما فيها الـ Scan)...")
 
     results = [None] * total_pages
 
-    # max_workers=2 للسلامة التامة للـ CPU والـ RAM
+    # max_workers=2 لحماية الـ CPU والـ RAM تماماً
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(process_single_page, task) for task in tasks]
         completed = 0
@@ -257,7 +274,6 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             fontName="Helvetica-Bold", fontSize=10, spaceAfter=6
         )
 
-        # ضبط الخط تلقائياً ليناسب حجم النص والأبعاد
         char_count = len(translated_text)
         f_size = 7 if char_count > 1500 else (8 if char_count > 800 else 9)
         leading = f_size + 3
@@ -316,7 +332,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# 3. واجهة التطبيق التفاعلية والجميلة
+# 4. الواجهة الرئيسية
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
@@ -336,6 +352,7 @@ with tab_text:
     if st.button("ترجمة النص", key="btn_translate_text"):
         if user_input_text.strip():
             with st.spinner("جاري الترجمة والتصحيح الأكاديمي..."):
+                from main import translate_document
                 result = translate_document(user_input_text)
                 if result.startswith("Error") or result.startswith("Translation Service Error"):
                     st.error(result)
@@ -346,7 +363,7 @@ with tab_text:
             st.warning("يرجى إدخال نص أولاً.")
 
 with tab_file:
-    st.subheader("رفع وترجمة ملف الـ PDF")
+    st.subheader("رفع وترجمة ملف الـ PDF (يدعم الـ Scanned والـ Text)")
     uploaded_file = st.file_uploader(
         "قم برفع ملف الـ PDF الطبي/الجيني", type=["pdf"]
     )
@@ -356,21 +373,18 @@ with tab_file:
 
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
             
-            # إنشاء مكان ديناميكي للعبة وشريط التقدم
             game_container = st.empty()
             
-            # عرض اللعبة فوراً للمستخدم أثناء العمل
             with game_container.container():
                 components.html(SNAKE_GAME_HTML, height=330)
 
             try:
+                from main import translate_document
                 final_pdf_bytes, combined_text = generate_side_by_side_pdf_safe(
                     uploaded_file, translate_document
                 )
                 
-                # إخفاء اللعبة بعد انتهاء الترجمة
                 game_container.empty()
-                
                 st.success("🎉 اكتملت المعالجة بنجاح!")
 
                 st.text_area(label="معاينة النص الإنجليزي المترجم والمصحح:", value=combined_text, height=250)
