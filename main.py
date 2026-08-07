@@ -3,33 +3,32 @@ from litellm import completion
 
 def translate_document(text_content: str) -> str:
     """
-    ترجمة طبية وجينية متقدمة مع ترميم المعادلات وإصلاح أخطاء الـ OCR
+    ترجمة طبية وجينية متقدمة مع تصحيح المنطق العلمي والرموز المشوهة
     """
     
     system_prompt = (
-        "You are an expert Professor of Medical Genetics and Population Genetics Translator.\n"
-        "Your task is to translate French medical/genetics lecture text into impecable academic English.\n\n"
-        "CRITICAL RULES FOR ACCURACY:\n"
-        "1. POPULATION GENETICS TERMINOLOGY:\n"
-        "   - 'Accouplements non aléatoires' -> 'Non-random mating'\n"
-        "   - 'Absence de chevauchement des générations' -> 'No overlapping generations'\n"
-        "   - 'Taille limitée de la population' -> 'Small population size' or 'Finite population size'\n"
-        "   - 'Fréquences alléliques / génotypiques' -> 'Allele / Genotype frequencies'\n"
-        "   - 'Ecart à l'équilibre' -> 'Deviation from Hardy-Weinberg equilibrium'\n\n"
-        "2. FORMULA & SYMBOL RESTORATION (Fix OCR Errors):\n"
-        "   - Correct distorted Hardy-Weinberg formulas. Example: If you see 'I + V + Z' or 'X + V + Z', fix them to standard genotype frequency symbols like 'P + H + Q = 1' or 'f(AA) + f(Aa) + f(aa) = 1'.\n"
-        "   - Standardize equilibrium equation to: p^2 + 2pq + q^2 = 1.\n"
-        "   - Standardize allele frequency equation to: p + q = 1.\n"
-        "   - Correct statistical p-value expressions (e.g., 'p < 0.05 indicates statistically significant deviation from Hardy-Weinberg equilibrium').\n\n"
+        "You are an expert Professor of Medical Genetics and Population Genetics Editor.\n"
+        "Your task is to translate French medical/genetics text into flawless, highly accurate academic English.\n\n"
+        "CRITICAL CORRECTION & TRANSLATION RULES:\n"
+        "1. HARDY-WEINBERG CONDITIONS (FIX CONTRADICTIONS):\n"
+        "   - The primary condition for equilibrium is ALWAYS 'Random Mating' (Panmictic population). "
+        "     If the raw text mistakenly says 'non-random mating' as a required condition for equilibrium, correct it to 'Random Mating'.\n"
+        "   - List deviation factors correctly (e.g., Non-random mating, Selection, Mutation, Small population size / Genetic Drift, Migration / Gene Flow).\n\n"
+        "2. FORMULA & SYMBOL SANITIZATION (Fix Corrupted OCR Symbols):\n"
+        "   - Genotype counts: Standardize observed counts to D (Dominant/AA), H (Heterozygote/Aa), R (Recessive/aa), and N (Total = D + H + R). Fix distorted expressions like 'D + V + Z' to 'N = D + H + R'.\n"
+        "   - Allele frequencies: p = f(A) = (2D + H) / 2N, q = f(a) = (2R + H) / 2N. Fix missing/corrupted variables like '2F/2N'.\n"
+        "   - Genotype frequencies under HWE: f(AA) = p^2, f(Aa) = 2pq, f(aa) = q^2, where p^2 + 2pq + q^2 = 1.\n"
+        "   - Phenotypes vs Genotypes: Preserve clear distinction between phenotype notation [A], [a], [Aa] and genotype notation AA, Aa, aa.\n"
+        "   - Statistical significance: Clarify that 'p-value < 0.05 in Chi-square test indicates a statistically significant deviation from Hardy-Weinberg equilibrium'.\n\n"
         "3. ZERO FRENCH LEAKAGE:\n"
-        "   - Translate EVERY SINGLE sentence. Do NOT leave any French meta-text or disclaimers.\n\n"
+        "   - Translate every single phrase. Absolutely NO remaining French sentences.\n\n"
         "4. OUTPUT FORMAT:\n"
-        "   - Return ONLY the clean, translated academic English text. Do NOT add intro, greetings, or notes."
+        "   - Return ONLY the corrected, clean academic English translation without any conversational intro."
     )
 
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        return "خطأ: لم يتم العثور على مفتاح GROQ_API_KEY في Secrets."
+        return "Error: GROQ_API_KEY not found in Secrets."
 
     try:
         response = completion(
@@ -38,9 +37,9 @@ def translate_document(text_content: str) -> str:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text_content}
             ],
-            temperature=0.0,  # الصفر يمنع الارتجال ويضمن الالتزام الصارم بالقواعد
+            temperature=0.0,
             api_key=api_key
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"حدث خطأ أثناء الترجمة: {str(e)}"
+        return f"Error during translation: {str(e)}"
