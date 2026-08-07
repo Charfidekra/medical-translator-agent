@@ -14,7 +14,7 @@ from pptx import Presentation
 try:
     import fitz  # PyMuPDF
 except ImportError:
-    st.error("مكتبة PyMuPDF غير مثبتة. يرجى إضافتها لملف requirements.txt")
+    st.error("مكتبة PyMuPDF غير مثبتة في requirements.txt")
 
 try:
     import cv2
@@ -40,11 +40,11 @@ from main import translate_document
 
 
 # ----------------------------------------------------
-# 0. تهيئة محرك EasyOCR بأمان (Lazy Loading)
+# 0. تهيئة محرك EasyOCR بأمان
 # ----------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_easyocr_reader():
-    """تحميل EasyOCR مرة واحدة فقط بشكل آمن"""
+    """تحميل EasyOCR عند الحاجة فقط دون إسقاط التطبيق"""
     if easyocr is not None:
         try:
             return easyocr.Reader(['fr', 'en'], gpu=False)
