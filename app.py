@@ -1,4 +1,5 @@
-import io
+
+ import io
 import fitz  # PyMuPDF
 import easyocr
 import numpy as np
@@ -16,23 +17,15 @@ def load_ocr_reader():
 
 
 def extract_best_text_from_page(page, reader) -> tuple[str, Image.Image]:
-    """
-    استخراج النص الذكي:
-    1. يحاول استخراج النص الرقمي المباشر أولاً (للحفاظ على دقة الرموز والمعادلات).
-    2. إذا كانت الصفحة صورة (Scanned)، ينتقل للـ EasyOCR.
-    """
-    # استخراج النص المباشر من الـ PDF
+    """استخراج النص الذكي للحفاظ على دقة الرموز والمعادلات"""
     direct_text = page.get_text("text").strip()
     
-    # تحضير الصورة
     pix = page.get_pixmap(dpi=150)
     img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
     
-    # إذا كان النص المباشر ممتازاً وواضحاً (أكثر من 50 حرف)، نعتمد عليه لمنع أخطاء الـ OCR
     if len(direct_text) > 50:
         return direct_text, img_pil
 
-    # إذا كان المستند ممسوحاً ضوئياً (Scanned Image)، نستخدم EasyOCR
     img_np = np.array(img_pil)
     results = reader.readtext(img_np, detail=0)
     ocr_text = " ".join([t for t in results if t.strip()])
@@ -52,10 +45,10 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. القراءة الذكية للنص (مباشر أو OCR)
+        # 1. القراءة الذكية
         extracted_text, final_img_pil = extract_best_text_from_page(orig_page, reader)
 
-        # 2. الترجمة والترميم عبر Groq
+        # 2. الترجمة والتصحيح الجيني
         if extracted_text.strip():
             translated_text = translator_func(extracted_text)
         else:
@@ -63,7 +56,7 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
 
         all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
 
-        # 3. بناء صفحة الترجمة اليمنى
+        # 3. بناء صفحة الترجمة مع العلامة المائية
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
 
@@ -73,11 +66,23 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             pagesize=(half_width, page_height),
             rightMargin=20,
             leftMargin=20,
-            topMargin=20,
-            bottomMargin=20,
+            topMargin=25,
+            bottomMargin=25,
         )
 
         styles = getSampleStyleSheet()
+        
+        # استايل العلامة المائية
+        watermark_style = ParagraphStyle(
+            "WatermarkStyle",
+            parent=styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=8,
+            textColor="#888888",
+            alignment=1, # Center alignment
+            spaceAfter=6,
+        )
+
         custom_style = ParagraphStyle(
             "SideBySideStyle",
             parent=styles["Normal"],
@@ -92,16 +97,26 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             parent=styles["Heading2"],
             fontName="Helvetica-Bold",
             fontSize=11,
-            spaceAfter=10,
+            spaceAfter=6,
         )
 
-        story = [Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)]
+        # إضافة العلامة المائية في الأعلى
+        story = [
+            Paragraph("— TRANSLATED BY MEDICAL TRANSLATOR AGENT —", watermark_style),
+            Paragraph("BY DEKRA CHARFI", watermark_style),
+            Spacer(1, 4),
+            Paragraph(f"--- Translation Page {page_num + 1} ---", title_style)
+        ]
 
         for para in translated_text.split("\n\n"):
             if para.strip():
                 formatted = para.strip().replace("\n", "<br/>")
                 story.append(Paragraph(formatted, custom_style))
                 story.append(Spacer(1, 4))
+
+        # إضافة العلامة المائية في أسفل الصفحة
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("BY DEKRA CHARFI", watermark_style))
 
         doc_temp.build(story)
         buffer.seek(0)
@@ -137,13 +152,14 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
 # ----------------------------------------------------
 # واجهة التطبيق
 # ----------------------------------------------------
-st.set_page_config(page_title="Medical Translator Agent", page_icon="🩺", layout="wide")
-st.title("🩺 Advanced Genetics & Medical Translator Agent")
+st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
+st.title("🩺 MEDICAL TRANSLATOR AGENT")
+st.caption("Advanced Medical & Population Genetics Translation Engine | **BY DEKRA CHARFI**")
 
-tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF (Smart Text & OCR)"])
+tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF (مع العلامة المائية)"])
 
 with tab_text:
-    st.subheader("ترجمة النص الطبي المباشر مع الترميم")
+    st.subheader("ترجمة النص الطبي المباشر وتصحيح المعادلات")
     user_input_text = st.text_area(
         label="أدخلي النص المراد ترجمته (فرنسي / عربي):",
         height=200,
@@ -152,7 +168,7 @@ with tab_text:
 
     if st.button("ترجمة النص", key="btn_translate_text"):
         if user_input_text.strip():
-            with st.spinner("جاري الترجمة والترميم الأكاديمي بواسطة Groq..."):
+            with st.spinner("جاري الترجمة والتصحيح الأكاديمي بواسطة MEDICAL TRANSLATOR AGENT..."):
                 try:
                     result = translate_document(user_input_text)
                     st.success("✅ تمت الترجمة بنجاح!")
@@ -172,19 +188,19 @@ with tab_file:
         st.success("تم استلام الملف بنجاح!")
 
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
-            with st.spinner("جاري القراءة الذكية، الترميم الرياضي، والترجمة..."):
+            with st.spinner("جاري الترجمة، تصحيح الرموز وإضافة العلامة المائية BY DEKRA CHARFI..."):
                 try:
                     final_pdf_bytes, combined_text = generate_side_by_side_pdf(
                         uploaded_file, translate_document
                     )
-                    st.success("✅ تم معالجة المستند وتصحيح المعادلات بنجاح!")
+                    st.success("✅ تم معالجة المستند وتوليد الـ PDF بنجاح!")
 
                     st.text_area(label="معاينة النص الإنجليزي المترجم والمصحح:", value=combined_text, height=300)
 
                     st.download_button(
-                        label="📥 تحميل الملف المقسوم المترجم (PDF)",
+                        label="📥 تحميل الملف المترجم (PDF) - BY DEKRA CHARFI",
                         data=final_pdf_bytes,
-                        file_name="side_by_side_translated_genetics.pdf",
+                        file_name="translated_genetics_BY_DEKRA_CHARFI.pdf",
                         mime="application/pdf",
                     )
                 except Exception as e:
