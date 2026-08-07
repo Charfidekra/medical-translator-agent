@@ -2,17 +2,17 @@ import os
 from litellm import completion
 
 def translate_document(text_content: str) -> str:
-    """ترجمة مباشرة وسريعة باستخدام Groq عبر LiteLLM"""
+    """ترجمة طبية مباشرة بدقة عالية باستخدام Groq عبر LiteLLM"""
     
     system_prompt = (
-        "You are an expert physician and Senior Medical Translator. Translate the provided French/Arabic medical text "
-        "into clear, academic, and accurate English. Preserve all original formatting, structures, and precise medical terminology. "
-        "Output ONLY the translated text without any preamble, labels, or repeated headers."
+        "You are an expert physician and Senior Medical Translator. Translate the provided French or Arabic medical text "
+        "accurately into clear, academic, and professional English. Preserve all original medical terminology, structures, and layout logic. "
+        "IMPORTANT: Output ONLY the translated English text without any intro remarks, labels, or preamble."
     )
 
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        return "خطأ: لم يتم العثور على مفتاح GROQ_API_KEY في إعدادات البيئة (Secrets)."
+        return "خطأ: لم يتم العثور على مفتاح GROQ_API_KEY في Streamlit Secrets."
 
     try:
         response = completion(
