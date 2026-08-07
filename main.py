@@ -2,10 +2,6 @@ import os
 from litellm import completion
 
 def translate_document(text_content: str) -> str:
-    """
-    ترجمة طبية وجينية متقدمة مع تصحيح المنطق العلمي والرموز المشوهة
-    """
-    
     system_prompt = (
         "You are an expert Professor of Medical Genetics and Population Genetics Editor.\n"
         "Your task is to translate French medical/genetics text into flawless, highly accurate academic English.\n\n"
