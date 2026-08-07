@@ -1,30 +1,17 @@
-"""
-main.py
--------
-نقطة الترجمة: تدير استرجاع المصطلحات (RAG) من terminology_db.py
-وتحطها فـ prompt قبل ما تبعث النص للنموذج.
-"""
-
-import os
+import time
 from litellm import completion
 from terminology_db import query_relevant_terms
 
-
-def translate_document(text: str) -> str:
-    # التاكد من وجود نص حقيقي
+def translate_document(text: str, max_retries: int = 4) -> str:
     if not text or len(text.strip()) < 3:
         return "[لا يوجد نص قابل للترجمة في هذه الصفحة]"
 
-    # 1. استرجاع المصطلحات ذات الصلة من قاعدة بيانات ChromaDB
-    # نستعملو غير جزء من النص (أول ~400 حرف) باش نسرعو البحث الدلالي
-    # بلا ما نأثرو كبير على جودة المصطلحات المسترجعة
     try:
         query_snippet = text[:400]
         relevant_terms = query_relevant_terms(query_snippet)
     except Exception as e:
         relevant_terms = f"(تعذر استرجاع المصطلحات: {e})"
 
-    # 2. بناء الـ system prompt مع حقن المصطلحات كسياق موثوق
     system_prompt = (
         "You are an expert medical translator and population geneticist. "
         "Translate the following medical and genetics text directly into formal academic English. "
@@ -36,15 +23,23 @@ def translate_document(text: str) -> str:
         "Do NOT mention the glossary or explain your choices — just produce the final translated text."
     )
 
-    try:
-        response = completion(
-            model="groq/llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.1
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"[خطأ في الترجمة: {str(e)}]"
+    delay = 3
+    for attempt in range(max_retries):
+        try:
+            response = completion(
+                model="groq/llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.1
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = "rate limit" in err_str or "429" in err_str or "too many requests" in err_str
+            if is_rate_limit and attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2  # exponential backoff: 3s, 6s, 12s, 24s
+                continue
+            return f"[خطأ في الترجمة: {str(e)}]"
