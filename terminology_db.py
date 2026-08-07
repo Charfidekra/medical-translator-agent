@@ -15,6 +15,18 @@ terminology_db.py
 فقط، لهذا يقدر يلقى مصطلحات حتى لو مكتوبة بصيغة مختلفة شوية فالنص.
 """
 
+# --- SQLite3 shim (ضروري لـ Streamlit Cloud) ---
+# نظام Streamlit Cloud فيه نسخة قديمة من sqlite3 و chromadb محتاج نسخة أحدث.
+# هاد الشيم كيبدل sqlite3 بـ pysqlite3-binary قبل ما chromadb يتقرا.
+try:
+    __import__("pysqlite3")
+    import sys
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    # فـ بيئة محلية عندها sqlite3 حديث بزاف، ماشي ضروري
+    pass
+# ------------------------------------------------
+
 import os
 import csv
 import chromadb
@@ -27,18 +39,31 @@ COLLECTION_NAME = "medical_terms_fr_en"
 # البحث فالمعجم يخدم حتى بلا اتصال بالإنترنت أو تكلفة إضافية.
 _embedding_fn = embedding_functions.DefaultEmbeddingFunction()
 
+# --- Cache للـ client و collection (تسريع الأداء) ---
+# بلا هاد الكاش، كل استدعاء لـ query_relevant_terms كان كيعاود يفتح
+# اتصال جديد بقاعدة البيانات من القرص، وهذا كان كيبطئ الترجمة بزاف
+# خصوصاً مع ملفات فيهم عدة صفحات.
+_client = None
+_collection = None
+
 
 def get_client():
-    os.makedirs(TERMINOLOGY_DB_PATH, exist_ok=True)
-    return chromadb.PersistentClient(path=TERMINOLOGY_DB_PATH)
+    global _client
+    if _client is None:
+        os.makedirs(TERMINOLOGY_DB_PATH, exist_ok=True)
+        _client = chromadb.PersistentClient(path=TERMINOLOGY_DB_PATH)
+    return _client
 
 
 def get_or_create_collection():
-    client = get_client()
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=_embedding_fn,
-    )
+    global _collection
+    if _collection is None:
+        client = get_client()
+        _collection = client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            embedding_function=_embedding_fn,
+        )
+    return _collection
 
 
 def build_database_from_csv(csv_path: str = TERMINOLOGY_SEED_FILE, reset: bool = False):
@@ -46,6 +71,7 @@ def build_database_from_csv(csv_path: str = TERMINOLOGY_SEED_FILE, reset: bool =
     يقرأ المعجم من ملف CSV ويبنيه/يحدثه فـ ChromaDB.
     reset=True يمسح المجموعة القديمة ويبنيها من جديد بالكامل.
     """
+    global _collection
     client = get_client()
 
     if reset:
@@ -53,11 +79,13 @@ def build_database_from_csv(csv_path: str = TERMINOLOGY_SEED_FILE, reset: bool =
             client.delete_collection(COLLECTION_NAME)
         except Exception:
             pass  # ما كانتش موجودة أصلاً
+        _collection = None  # نجبروه يعاود يبني الكائن بعد الـ reset
 
     collection = client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=_embedding_fn,
     )
+    _collection = collection
 
     ids, documents, metadatas = [], [], []
 
@@ -148,7 +176,7 @@ def add_single_term(french_term: str, english_term: str, domain: str = "", notes
     print(f"[INFO] تمت إضافة المصطلح: {french_term} -> {english_term}")
 
 
-
+if __name__ == "__main__":
     # تشغيل مباشر لهذا الملف يبني قاعدة البيانات من الصفر
     build_database_from_csv(reset=True)
 
