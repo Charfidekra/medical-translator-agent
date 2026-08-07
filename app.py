@@ -12,54 +12,35 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 @st.cache_resource
 def load_ocr_reader():
-    """تحميل نموذج EasyOCR للفرنسية والإنجليزية مرة واحدة في الذاكرة"""
     return easyocr.Reader(["fr", "en"], gpu=False)
 
 
-def extract_page_text_with_ocr(img_pil, reader) -> tuple[str, Image.Image]:
+def extract_best_text_from_page(page, reader) -> tuple[str, Image.Image]:
     """
-    استخراج النصوص من الصورة عبر OCR مع الفحص الذكي:
-    1. قراءة النصوص المكتوبة.
-    2. التجريب الافتراضي وإذا كان النص المنسوخ قليلاً يقرأ بتدوير الصورة 180 درجة (في حال المستند المقلوب).
+    استخراج النص الذكي:
+    1. يحاول استخراج النص الرقمي المباشر أولاً (للحفاظ على دقة الرموز والمعادلات).
+    2. إذا كانت الصفحة صورة (Scanned)، ينتقل للـ EasyOCR.
     """
+    # استخراج النص المباشر من الـ PDF
+    direct_text = page.get_text("text").strip()
+    
+    # تحضير الصورة
+    pix = page.get_pixmap(dpi=150)
+    img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
+    
+    # إذا كان النص المباشر ممتازاً وواضحاً (أكثر من 50 حرف)، نعتمد عليه لمنع أخطاء الـ OCR
+    if len(direct_text) > 50:
+        return direct_text, img_pil
+
+    # إذا كان المستند ممسوحاً ضوئياً (Scanned Image)، نستخدم EasyOCR
     img_np = np.array(img_pil)
     results = reader.readtext(img_np, detail=0)
-    text = " ".join([t for t in results if t.strip()])
+    ocr_text = " ".join([t for t in results if t.strip()])
     
-    # فحص ما إذا كانت الصفحة مقلوبة ضوئياً (فحص زاوية القراءة)
-    if len(text) < 15:
-        img_rotated = img_pil.rotate(180, expand=True)
-        img_rotated_np = np.array(img_rotated)
-        results_rotated = reader.readtext(img_rotated_np, detail=0)
-        text_rotated = " ".join([t for t in results_rotated if t.strip()])
-        if len(text_rotated) > len(text):
-            return text_rotated, img_rotated
-
-    return text, img_pil
-
-
-def add_watermark(page, text="by dekra charfi"):
-    """إضافة العلامة المائية المخصصة"""
-    rect = page.rect
-    watermark_rect = fitz.Rect(
-        rect.width * 0.1,
-        rect.height * 0.45,
-        rect.width * 0.9,
-        rect.height * 0.55
-    )
-    page.insert_textbox(
-        watermark_rect,
-        text,
-        fontsize=24,
-        fontname="helv",
-        color=(0.75, 0.75, 0.75),
-        align=1,
-        overlay=True
-    )
+    return ocr_text, img_pil
 
 
 def generate_side_by_side_pdf(uploaded_file, translator_func):
-    """معالجة كافة الصفحات وإخراج PDF مقسوم (أصل أيسر + ترجمة أيمن)"""
     reader = load_ocr_reader()
 
     uploaded_file.seek(0)
@@ -71,22 +52,18 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
     for page_num in range(len(orig_doc)):
         orig_page = orig_doc[page_num]
 
-        # 1. استخراج الصورة بالدقة عالية للقراءة بالـ OCR
-        pix = orig_page.get_pixmap(dpi=150)
-        img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
+        # 1. القراءة الذكية للنص (مباشر أو OCR)
+        extracted_text, final_img_pil = extract_best_text_from_page(orig_page, reader)
 
-        # 2. القراءة بالـ OCR وفحص التدوير تلقائياً
-        extracted_text, final_img_pil = extract_page_text_with_ocr(img_pil, reader)
-
-        # 3. الترجمة عبر Groq
+        # 2. الترجمة والترميم عبر Groq
         if extracted_text.strip():
             translated_text = translator_func(extracted_text)
         else:
-            translated_text = "لم يتم العثور على نص واضح في هذه الصفحة."
+            translated_text = "No clear text found on this page."
 
         all_translated_texts.append(f"--- Page {page_num + 1} ---\n{translated_text}")
 
-        # 4. بناء صفحة الترجمة اليمنى باستخدام ReportLab
+        # 3. بناء صفحة الترجمة اليمنى
         half_width = orig_page.rect.width
         page_height = orig_page.rect.height
 
@@ -129,11 +106,10 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
         doc_temp.build(story)
         buffer.seek(0)
 
-        # 5. دمج النصفين أفقياً في صفحة واحدة عريضة
+        # 4. الدمج الأفقي
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
-        # رسم الصورة المصححة الأصلية في الجهة اليسرى
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -141,16 +117,12 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # رسم النص المترجم في الجهة اليمنى
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(half_width, 0, total_width, page_height),
             translated_pdf_doc,
             0,
         )
-
-        # إضافة العلامة المائية
-        add_watermark(combo_page, "by dekra charfi")
 
     output_buffer = io.BytesIO()
     new_doc.save(output_buffer)
@@ -163,15 +135,15 @@ def generate_side_by_side_pdf(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# واجهة التطبيق عبر Streamlit
+# واجهة التطبيق
 # ----------------------------------------------------
 st.set_page_config(page_title="Medical Translator Agent", page_icon="🩺", layout="wide")
-st.title("🩺 Medical Translator Agent (Powered by Groq)")
+st.title("🩺 Advanced Genetics & Medical Translator Agent")
 
-tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF (Scanned & Direct)"])
+tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف PDF (Smart Text & OCR)"])
 
 with tab_text:
-    st.subheader("ترجمة النص الطبي مباشرة")
+    st.subheader("ترجمة النص الطبي المباشر مع الترميم")
     user_input_text = st.text_area(
         label="أدخلي النص المراد ترجمته (فرنسي / عربي):",
         height=200,
@@ -180,11 +152,11 @@ with tab_text:
 
     if st.button("ترجمة النص", key="btn_translate_text"):
         if user_input_text.strip():
-            with st.spinner("جاري ترجمة النص بواسطة Groq..."):
+            with st.spinner("جاري الترجمة والترميم الأكاديمي بواسطة Groq..."):
                 try:
                     result = translate_document(user_input_text)
                     st.success("✅ تمت الترجمة بنجاح!")
-                    st.text_area(label="النص المترجم:", value=result, height=250)
+                    st.text_area(label="النص المترجم والمصحح:", value=result, height=250)
                 except Exception as e:
                     st.error(f"حدث خطأ أثناء الترجمة: {e}")
         else:
@@ -193,26 +165,26 @@ with tab_text:
 with tab_file:
     st.subheader("رفع وترجمة ملف الـ PDF")
     uploaded_file = st.file_uploader(
-        " قم برفع ملف الـ PDF الطبي (يدعم المستندات الممسوحة ضوئياً - Scanned)", type=["pdf"]
+        "قم برفع ملف الـ PDF الطبي/الجيني", type=["pdf"]
     )
 
     if uploaded_file is not None:
         st.success("تم استلام الملف بنجاح!")
 
-        if st.button("ترجمة المستند وإصدار الملف المقسوم", key="btn_translate_file"):
-            with st.spinner("جاري معالجة الـ OCR، الفحص، والترجمة بـ Groq..."):
+        if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
+            with st.spinner("جاري القراءة الذكية، الترميم الرياضي، والترجمة..."):
                 try:
                     final_pdf_bytes, combined_text = generate_side_by_side_pdf(
                         uploaded_file, translate_document
                     )
-                    st.success("✅ تم استخراج المستند والترجمة بنجاح!")
+                    st.success("✅ تم معالجة المستند وتصحيح المعادلات بنجاح!")
 
-                    st.text_area(label="معاينة النص الإنجليزي المترجم كاملًا:", value=combined_text, height=300)
+                    st.text_area(label="معاينة النص الإنجليزي المترجم والمصحح:", value=combined_text, height=300)
 
                     st.download_button(
                         label="📥 تحميل الملف المقسوم المترجم (PDF)",
                         data=final_pdf_bytes,
-                        file_name="side_by_side_translated.pdf",
+                        file_name="side_by_side_translated_genetics.pdf",
                         mime="application/pdf",
                     )
                 except Exception as e:
