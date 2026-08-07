@@ -8,3 +8,5 @@ Pillow
 pytesseract
 reportlab
 litellm
+chromadb
+pysqlite3-binary
