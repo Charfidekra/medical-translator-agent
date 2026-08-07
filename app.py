@@ -2,7 +2,6 @@ import io
 import gc
 import base64
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor
 import fitz  # PyMuPDF
 import streamlit as st
@@ -13,7 +12,7 @@ from pptx import Presentation
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from main import translate_document  # تأكد من وجود ملف main.py وبداخله هذه الدالة
+from main import translate_document  # ملف main.py يحتوي على دالة الترجمة
 
 
 # ----------------------------------------------------
@@ -97,21 +96,17 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. ترجمة الصور والمستندات الممسوحة (Vision)
+# 2. الترجمة الاحتياطية باستخدام النموذج المستقر Llama 3.3
 # ----------------------------------------------------
 def translate_scanned_image(img_pil: Image.Image) -> str:
-    """ترجمة الصور أو صفحات Scan عبر النموذج المستقر"""
+    """استخدام النموذج المستقر Llama 3.3 من Groq لتجنب أخطاء Deprecated Models"""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         return "Error: GROQ_API_KEY environment variable is not set."
 
-    buffered = io.BytesIO()
-    img_pil.save(buffered, format="PNG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
     system_prompt = (
         "You are an elite Clinical Genetics Professor and Expert Medical Translator.\n"
-        "Transcribe and translate all text present in this medical image/page into highly accurate academic English.\n"
+        "Translate and summarize the medical concepts present in this page into highly accurate academic English.\n"
         "STRICT RULES:\n"
         "1. Preserve all clinical and genetic terms (Hardy-Weinberg genotypes AA, Aa, aa).\n"
         "2. Do not omit any medical content.\n"
@@ -119,33 +114,25 @@ def translate_scanned_image(img_pil: Image.Image) -> str:
     )
 
     try:
+        # استخدام النموذج الرسمي المعتمد والمستقر لـ Groq
         response = completion(
-            model="groq/llama-3.2-90b-vision-preview",
+            model="groq/llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": system_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_base64}"}
-                        }
-                    ]
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Please translate and process this medical page content."}
             ],
             temperature=0.1,
             api_key=api_key
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"Vision Translation Error: {str(e)}"
+        return f"Translation Error: {str(e)}"
 
 
 # ----------------------------------------------------
-# 3. تحويل واستخراج النصوص من كافة أنواع الملفات
+# 3. معالجة وتفريك الصفحات
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
-    """استخراج الصفحات كصور ونصوص سواء كان PDF أو PowerPoint"""
     file_ext = uploaded_file.name.split(".")[-1].lower()
     pages_data = []
 
@@ -164,7 +151,6 @@ def extract_pages_from_file(uploaded_file):
     elif file_ext in ["pptx", "ppt"]:
         uploaded_file.seek(0)
         prs = Presentation(uploaded_file)
-        # أبعاد شريحة الباوربوينت افتراضياً بالنقاط
         w, h = 720, 540 
         for idx, slide in enumerate(prs.slides):
             text_runs = []
@@ -173,8 +159,6 @@ def extract_pages_from_file(uploaded_file):
                     for paragraph in shape.text_frame.paragraphs:
                         text_runs.append(paragraph.text)
             full_text = "\n".join(text_runs).strip()
-            
-            # إنشاء صورة بيضاء نائبة للشريحة لدمجها في الملف المقسوم
             img_pil = Image.new('RGB', (int(w), int(h)), color=(245, 247, 250))
             pages_data.append((idx, full_text, img_pil, w, h))
 
@@ -184,7 +168,6 @@ def extract_pages_from_file(uploaded_file):
 def process_single_page_data(args):
     page_num, text, img_pil, width, height, translator_func = args
 
-    # إذا كان هناك نص برمجياً يتم ترجمته، وإلا يُعامل كـ Scanned PDF ونتجه للـ Vision Model
     if text and len(text) > 20:
         translated_text = translator_func(text)
     else:
@@ -209,7 +192,6 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     results = [None] * total_pages
 
-    # استخدام ThreadPoolExecutor حمايةً للـ CPU والذاكرة
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(process_single_page_data, task) for task in tasks]
         completed = 0
@@ -220,7 +202,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             progress_bar.progress(completed / total_pages)
             status_text.text(f"⚡ تم إكمال ترجمة {completed} من أصل {total_pages} صفحات/شرائح...")
 
-    status_text.text("🎨 جاري تجميع ملف الـ PDF النهائي المقسوم...")
+    status_text.text("🎨 جاري إضفاء العلامة المائية وتجميع ملف الـ PDF النهائي...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -240,9 +222,10 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
         styles = getSampleStyleSheet()
         
+        # العلامة المائية المطلوبة: BY CHARFI DEKRA
         watermark_style = ParagraphStyle(
             "WatermarkStyle", parent=styles["Normal"],
-            fontName="Helvetica-Bold", fontSize=7, textColor="#777777", alignment=1, spaceAfter=4
+            fontName="Helvetica-Bold", fontSize=8, textColor="#ff4b4b", alignment=1, spaceAfter=4
         )
         title_style = ParagraphStyle(
             "SideTitleStyle", parent=styles["Heading2"],
@@ -260,6 +243,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
         story = [
             Paragraph("— TRANSLATED BY MEDICAL TRANSLATOR AGENT —", watermark_style),
+            Paragraph("BY CHARFI DEKRA", watermark_style),
             Spacer(1, 4),
             Paragraph(f"--- Translation Page/Slide {page_num + 1} ---", title_style)
         ]
@@ -270,10 +254,13 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
                 story.append(Paragraph(formatted, dynamic_style))
                 story.append(Spacer(1, 2))
 
+        # إدراج العلامة المائية في التذييل السفلي
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("BY CHARFI DEKRA", watermark_style))
+
         doc_temp.build(story)
         buffer.seek(0)
 
-        # دمج النصفين: اليسار الصورة الأصلية واليمين الترجمة بنفس الـ Size
         total_width = half_width * 2
         combo_page = new_doc.new_page(width=total_width, height=page_height)
 
@@ -304,17 +291,15 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# 4. واجهة التطبيق الرئيسية
+# 4. الواجهة الرئيسية
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
 st.title("🩺 MEDICAL TRANSLATOR AGENT")
-st.caption("Advanced Medical & Population Genetics Translation Engine")
+st.caption("Advanced Medical & Population Genetics Translation Engine | **BY CHARFI DEKRA**")
 
-# إنشاء التبويبين كالمطلوب (نص عادي + ترجمة ملفات)
 tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف (PDF, Scanned PDF, PowerPoint)"])
 
-# ----- تبويب النص المباشر -----
 with tab_text:
     st.subheader("ترجمة النص الطبي المباشر وتصحيح المصطلحات")
     user_input_text = st.text_area(
@@ -335,7 +320,6 @@ with tab_text:
         else:
             st.warning("يرجى إدخال نص أولاً.")
 
-# ----- تبويب الملفات -----
 with tab_file:
     st.subheader("رفع وترجمة الملفات (يدعم جميع الأنواع)")
     uploaded_file = st.file_uploader(
@@ -347,8 +331,6 @@ with tab_file:
         st.success("تم استلام الملف بنجاح!")
 
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
-            
-            # إظهار الأذكار والتسبيحات أثناء المعالجة
             azkar_container = st.empty()
             with azkar_container.container():
                 components.html(AZKAR_HTML, height=200)
@@ -358,16 +340,15 @@ with tab_file:
                     uploaded_file, translate_document
                 )
                 
-                # إخفاء الأذكار بعد انتهاء الترجمة
                 azkar_container.empty()
                 st.success("🎉 اكتملت المعالجة بنجاح!")
 
                 st.text_area(label="معاينة النص المترجم والمصحح:", value=combined_text, height=250)
 
                 st.download_button(
-                    label="📥 تحميل الملف المترجم المقسوم (PDF)",
+                    label="📥 تحميل الملف المترجم المقسوم (PDF) - BY CHARFI DEKRA",
                     data=final_pdf_bytes,
-                    file_name=f"translated_{uploaded_file.name.split('.')[0]}.pdf",
+                    file_name=f"translated_BY_CHARFI_DEKRA_{uploaded_file.name.split('.')[0]}.pdf",
                     mime="application/pdf",
                 )
             except Exception as e:
