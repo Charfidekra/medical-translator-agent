@@ -14,7 +14,7 @@ from pptx import Presentation
 try:
     import fitz  # PyMuPDF
 except ImportError:
-    st.error("مكتبة PyMuPDF غير مثبتة. يرجى تشغيل: pip install PyMuPDF")
+    st.error("مكتبة PyMuPDF غير مثبتة. يرجى إضافتها لملف requirements.txt")
 
 try:
     import cv2
