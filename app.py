@@ -22,11 +22,6 @@ except ImportError:
     cv2 = None
 
 try:
-    import easyocr
-except ImportError:
-    easyocr = None
-
-try:
     import pytesseract
     tesseract_cmd_path = shutil.which("tesseract")
     if tesseract_cmd_path:
@@ -42,17 +37,6 @@ from main import translate_document
 # ----------------------------------------------------
 # 0. تهيئة محرك EasyOCR بأمان
 # ----------------------------------------------------
-@st.cache_resource(show_spinner=False)
-def load_easyocr_reader():
-    """تحميل EasyOCR عند الحاجة فقط دون إسقاط التطبيق"""
-    if easyocr is not None:
-        try:
-            return easyocr.Reader(['fr', 'en'], gpu=False)
-        except Exception:
-            return None
-    return None
-
-
 # ----------------------------------------------------
 # 1. واجهة الأذكار والتسبيحات أثناء المعالجة
 # ----------------------------------------------------
@@ -150,21 +134,10 @@ def clean_and_enhance_image(img_pil: Image.Image):
 
 
 def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
-    """محاولة الاستخراج متعددة المستويات (EasyOCR -> Tesseract)"""
+    """استخراج النص عبر Tesseract OCR (أخف وأسرع، بلا نماذج ثقيلة تتحمل من الإنترنت)"""
     extracted_text = ""
-    
-    # 1. التجربة الأولى: عبر EasyOCR
-    reader = load_easyocr_reader()
-    if reader is not None:
-        try:
-            processed_img = clean_and_enhance_image(img_pil)
-            results = reader.readtext(processed_img, detail=0, paragraph=True)
-            extracted_text = "\n".join(results).strip()
-        except Exception:
-            extracted_text = ""
 
-    # 2. التجربة الثانية: التراجع إلى Tesseract إذا فشل EasyOCR
-    if not extracted_text and pytesseract is not None:
+    if pytesseract is not None:
         try:
             processed_img = clean_and_enhance_image(img_pil)
             extracted_text = pytesseract.image_to_string(processed_img, lang="fra+eng", config=r'--oem 3 --psm 6').strip()
@@ -173,7 +146,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
 
     if extracted_text and len(extracted_text) >= 3:
         return translator_func(extracted_text)
-    
+
     return "[الصفحة تحتوي على مخططات/رسوم توضيحية بدون نص قابل للقراءة]"
 
 
@@ -191,8 +164,8 @@ def extract_pages_from_file(uploaded_file):
             page = doc[page_num]
             text = page.get_text("text").strip()
             
-            # التقاط صورة عالية الوضوح 300 DPI
-            pix = page.get_pixmap(dpi=300)
+            # التقاط صورة بجودة متوسطة (150 DPI) لتقليل استهلاك الذاكرة
+            pix = page.get_pixmap(dpi=150)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
             pages_data.append((page_num, text, img_pil, w, h))
@@ -292,13 +265,14 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # الصفحة الأصلية (يسار)
+        # الصفحة الأصلية (يسار) - نستعملو JPEG بدل PNG لتقليل استهلاك الذاكرة وحجم الملف
         img_byte_arr = io.BytesIO()
-        final_img_pil.save(img_byte_arr, format="PNG")
+        final_img_pil.convert("RGB").save(img_byte_arr, format="JPEG", quality=75)
         combo_page.insert_image(
             fitz.Rect(0, 0, orig_w, orig_h),
             stream=img_byte_arr.getvalue()
         )
+        img_byte_arr.close()
 
         # النص المترجم (يمين)
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
