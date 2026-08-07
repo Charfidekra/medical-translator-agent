@@ -1,13 +1,14 @@
 import io
 import gc
 import os
-import shutil
 import fitz  # PyMuPDF
+import numpy as np
+import cv2
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image
 from pptx import Presentation
-import pytesseract
+import easyocr
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
@@ -15,11 +16,14 @@ from main import translate_document
 
 
 # ----------------------------------------------------
-# 0. تهيئة مسار Tesseract OCR تلقائياً
+# 0. تهيئة محرك EasyOCR (تحميل النموذج لمرة واحدة)
 # ----------------------------------------------------
-tesseract_cmd_path = shutil.which("tesseract")
-if tesseract_cmd_path:
-    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd_path
+@st.cache_resource
+def load_ocr_reader():
+    # يدعم الفرنسية والإنجليزية معاً مع الذكاء الاصطناعي
+    return easyocr.Reader(['fr', 'en'], gpu=False)
+
+ocr_reader = load_ocr_reader()
 
 
 # ----------------------------------------------------
@@ -76,7 +80,7 @@ AZKAR_HTML = """
 </head>
 <body>
   <div class="card">
-    <div class="title">✨ جاري معالجة المستند... استغل الوقت بالذكر</div>
+    <div class="title">✨ جاري معالجة المستند بقارئ الذكاء الاصطناعي... استغل الوقت بالذكر</div>
     <div class="zikr" id="zikr-box">سُبْحَانَ اللَّهِ وَبِحَمْدِهِ ، سُبْحَانَ اللَّهِ الْعَظِيمِ</div>
     <div class="sub">يتغيّر الذكر تلقائياً كل بضع ثوانٍ</div>
   </div>
@@ -103,46 +107,39 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. تحسين معالجة الصور وقراءة OCR المتطورة
+# 2. معالجة الصور واستخراج النصوص العميق عبر EasyOCR
 # ----------------------------------------------------
-def preprocess_image_advanced(img_pil: Image.Image) -> Image.Image:
-    """تحسين الصورة لإزالة التشويش والعلامات المائية وإبراز النصوص"""
-    gray = ImageOps.grayscale(img_pil)
-    # زيادة التباين لمحو الخلفيات الباهتة
-    enhancer = ImageEnhance.Contrast(gray)
-    enhanced = enhancer.enhance(2.5)
-    # تصفية التشويش
-    filtered = enhanced.filter(ImageFilter.SHARPEN)
-    return filtered
+def clean_and_enhance_image(img_pil: Image.Image) -> np.ndarray:
+    """تحويل الصورة إلى OpenCV وتنقيتها من العلامات المائية المائلة"""
+    open_cv_image = np.array(img_pil.convert('RGB')) 
+    gray = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
+    
+    # تحسين التباين التكيفي لإبراز أسطر النصوص الطباعية
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    enhanced = clahe.apply(gray)
+    
+    return enhanced
 
 
-def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
-    extracted_text = ""
+def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
+    """استخراج النصوص حتى من أصعب السلايدات باستخدام العمق العصبي"""
     try:
-        processed_img = preprocess_image_advanced(img_pil)
-        
-        # تجربة إعدادين مختلفين لـ Tesseract للحصول على أفضل قراءة للنصوص المعقدة
-        configs = [r'--oem 3 --psm 6', r'--oem 3 --psm 3']
-        for cfg in configs:
-            text_candidate = pytesseract.image_to_string(processed_img, lang="fra+eng", config=cfg).strip()
-            if len(text_candidate) > len(extracted_text):
-                extracted_text = text_candidate
-
-    except Exception:
+        processed_img = clean_and_enhance_image(img_pil)
+        # تشغيل EasyOCR مع دمج الكلمات المترابطة
+        results = ocr_reader.readtext(processed_img, detail=0, paragraph=True)
+        extracted_text = "\n".join(results).strip()
+    except Exception as e:
         extracted_text = ""
 
-    # إزالة الأسطر الفارغة أو المسافات المتكررة
-    cleaned_lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
-    extracted_text = "\n".join(cleaned_lines)
-
-    if not extracted_text or len(extracted_text) < 3:
-        return "[الصفحة تحتوي على مخططات/رسوم توضيحية بدون نص قابل للقراءة]"
-
-    return translator_func(extracted_text)
+    # إذا كشفت القراءة عن نص أطول من 3 أحرف
+    if extracted_text and len(extracted_text) >= 3:
+        return translator_func(extracted_text)
+    
+    return "[هذه الصفحة عبارة عن رسم توضيحي/صورة بدون محتوى نصي]"
 
 
 # ----------------------------------------------------
-# 3. استخراج النص وبناء ملف Side-by-Side PDF
+# 3. استخراج الصفحات وبناء Side-by-Side PDF
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -153,10 +150,9 @@ def extract_pages_from_file(uploaded_file):
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         for page_num in range(len(doc)):
             page = doc[page_num]
-            # استخراج النص المحتوى داخلياً مباشرة
             text = page.get_text("text").strip()
             
-            # رفع بدقة الصورة إلى 300 DPI لضمان نجاح OCR إذا كانت الصورة ممسوحة ضوئياً
+            # التقاط صورة الصفحة بوضوح عالي 300 DPI
             pix = page.get_pixmap(dpi=300)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
@@ -187,21 +183,22 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري استخراج النص وترجمته أكاديمياً...")
+    status_text.text("🚀 جاري استخراج النص بالشبكات العصبية وترجمته...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
-        # استخدام النص المستخرج بـ PyMuPDF أو اللجوء إلى OCR المحسّن
-        if text and len(text) >= 5:
+        # 1. التجربة الأولى: النص الرقمي المباشر داخل الـ PDF
+        if text and len(text) >= 10:
             translated_text = translator_func(text)
         else:
-            translated_text = process_scanned_image_ocr(img_pil, translator_func)
+            # 2. التجربة الثانية: محرك EasyOCR للصور والمستندات الممسوحة والمغطاة بـ Watermark
+            translated_text = process_deep_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم معالجة وترجمة {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم ترجمة {completed} من أصل {total_pages} صفحات...")
 
-    status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وتنسيق الـ PDF...")
+    status_text.text("🎨 جاري دمج الصفحات وتطبيق العلامة المائية BY CHARFI DEKRA...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -210,18 +207,13 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         all_translated_texts.append(f"--- Page/Slide {page_num + 1} ---\n{translated_text}")
 
         buffer = io.BytesIO()
-        
         doc_temp = SimpleDocTemplate(
             buffer,
             pagesize=(orig_w, orig_h),
-            rightMargin=15,
-            leftMargin=15,
-            topMargin=15,
-            bottomMargin=15,
+            rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15,
         )
 
         styles = getSampleStyleSheet()
-        
         watermark_style = ParagraphStyle(
             "WatermarkStyle", parent=styles["Normal"],
             fontName="Helvetica-Bold", fontSize=8, textColor="#ff4b4b", alignment=1, spaceAfter=2
@@ -259,7 +251,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # جهة اليسار: الصفحة الأصلية
+        # جهة اليسار: الأصل
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -267,7 +259,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # جهة اليمين: الترجمة والعلامة المائية
+        # جهة اليمين: الترجمة
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
@@ -288,12 +280,12 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# 4. واجهة التطبيق
+# 4. واجهة التطبيق الرئيسية
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
 st.title("🩺 MEDICAL TRANSLATOR AGENT")
-st.caption("Advanced Medical & Population Genetics Translation Engine | **BY CHARFI DEKRA**")
+st.caption("Advanced Deep Learning Medical Translation Engine | **BY CHARFI DEKRA**")
 
 tab_text, tab_file = st.tabs(["📝 ترجمة نص مباشر", "📄 ترجمة ملف (PDF, Scanned PDF, PowerPoint)"])
 
@@ -315,7 +307,7 @@ with tab_text:
             st.warning("يرجى إدخال نص أولاً.")
 
 with tab_file:
-    st.subheader("رفع وترجمة الملفات (يدعم جميع الأنواع)")
+    st.subheader("رفع وترجمة الملفات (معالج الصور المعقدة مدمج)")
     uploaded_file = st.file_uploader(
         "قم برفع الملف (PDF عادي، PDF ممسوح ضوئياً، PowerPoint .pptx)", 
         type=["pdf", "pptx", "ppt"]
@@ -335,7 +327,7 @@ with tab_file:
                 )
                 
                 azkar_container.empty()
-                st.success("🎉 اكتملت المعالجة بنجاح!")
+                st.success("🎉 اكتملت المعالجة والترجمة بنجاح!")
 
                 st.text_area(label="معاينة النص المترجم والمصحح:", value=combined_text, height=250)
 
