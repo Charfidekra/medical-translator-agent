@@ -4,4 +4,10 @@ easyocr
 PyMuPDF
 Pillow
 numpy
+reportlab 
+streamlit
+PyMuPDF
+Pillow
+litellm
+python-pptx
 reportlab
