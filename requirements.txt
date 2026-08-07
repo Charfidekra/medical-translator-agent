@@ -1,7 +1,7 @@
 streamlit
-PyMuPDF
-easyocr
-numpy
-Pillow
-reportlab
 litellm
+easyocr
+PyMuPDF
+Pillow
+numpy
+reportlab
