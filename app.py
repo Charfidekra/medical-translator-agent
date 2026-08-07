@@ -1,6 +1,8 @@
 import io
 import gc
 import os
+import shutil
+from concurrent.futures import ThreadPoolExecutor
 import fitz  # PyMuPDF
 import streamlit as st
 import streamlit.components.v1 as components
@@ -11,7 +13,15 @@ import pytesseract
 
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from main import translate_document
+from main import translate_document  # تأكد من وجود ملف main.py وبداخله دالة translate_document
+
+
+# ----------------------------------------------------
+# 0. تهيئة مسار Tesseract OCR تلقائياً في Streamlit
+# ----------------------------------------------------
+tesseract_cmd_path = shutil.which("tesseract")
+if tesseract_cmd_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_cmd_path
 
 
 # ----------------------------------------------------
@@ -95,29 +105,27 @@ AZKAR_HTML = """
 
 
 # ----------------------------------------------------
-# 2. استخراج النص بالـ OCR ثم الترجمة بـ Llama 3.3
+# 2. استخراج النص بالـ OCR آمن وبدون توقف
 # ----------------------------------------------------
 def process_scanned_image_ocr(img_pil: Image.Image, translator_func) -> str:
-    """استخراج النص بالـ OCR أولاً من الصورة لمنع إرسال صفحات فارغة"""
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        return "Error: GROQ_API_KEY environment variable is not set."
-
+    """استخراج النص بالـ OCR آمن يضمن عدم إيقاف المعالجة في حال رداءة الجودة"""
+    extracted_text = ""
     try:
-        # استخراج النص المحتوى بالصورة عبر pytesseract
         extracted_text = pytesseract.image_to_string(img_pil, lang="eng+fra").strip()
     except Exception:
         extracted_text = ""
 
-    if not extracted_text or len(extracted_text) < 10:
-        return "No readable medical text found on this page/slide."
+    if not extracted_text or len(extracted_text) < 5:
+        return "[No readable medical text extracted from this page/slide]"
 
-    # ترجمة النص المستخرج عبر دالة الترجمة المعتمدة
-    return translator_func(extracted_text)
+    try:
+        return translator_func(extracted_text)
+    except Exception as e:
+        return f"[Translation Error on this page: {str(e)}]"
 
 
 # ----------------------------------------------------
-# 3. معالجة وحساب مقاسات الصفحات بشكل متطابق 100%
+# 3. قراءة الملفات واستخراج صفحاتها بأبعادها الأصلية
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -138,7 +146,7 @@ def extract_pages_from_file(uploaded_file):
     elif file_ext in ["pptx", "ppt"]:
         uploaded_file.seek(0)
         prs = Presentation(uploaded_file)
-        w, h = 720, 540  # الحجم القياسي لشريحة الباوربوينت
+        w, h = 720, 540  # الحجم القياسي لشريحة PowerPoint
         for idx, slide in enumerate(prs.slides):
             text_runs = []
             for shape in slide.shapes:
@@ -158,20 +166,23 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("🚀 جاري قراءة ومعالجة الصفحات...")
+    status_text.text("🚀 جاري قراءة المستند وترجمة الصفحات...")
 
     results = []
     for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
         if text and len(text) > 20:
-            translated_text = translator_func(text)
+            try:
+                translated_text = translator_func(text)
+            except Exception as e:
+                translated_text = f"[Translation Error: {str(e)}]"
         else:
             translated_text = process_scanned_image_ocr(img_pil, translator_func)
 
         results.append((p_num, translated_text, img_pil, w, h))
         progress_bar.progress(completed / total_pages)
-        status_text.text(f"⚡ تم ترجمة {completed} من أصل {total_pages} صفحات...")
+        status_text.text(f"⚡ تم إكمال ترجمة {completed} من أصل {total_pages} صفحات...")
 
-    status_text.text("🎨 جاري ضبط المقاسات وتطبيق العلامة المائية BY CHARFI DEKRA...")
+    status_text.text("🎨 جاري تطبيق العلامة المائية BY CHARFI DEKRA وتنسيق الـ PDF...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -181,7 +192,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
         buffer = io.BytesIO()
         
-        # ضبط أبعاد صفحة PDF المترجمة لتكون متطابقة تماماً 1:1 مع الأبعاد الأصلية
+        # إعداد أبعاد الصفحة المترجمة مطابقة 100% مع أبعاد الصفحة الأصلية
         doc_temp = SimpleDocTemplate(
             buffer,
             pagesize=(orig_w, orig_h),
@@ -193,7 +204,6 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
         styles = getSampleStyleSheet()
         
-        # العلامة المائية المطلوبة: BY CHARFI DEKRA
         watermark_style = ParagraphStyle(
             "WatermarkStyle", parent=styles["Normal"],
             fontName="Helvetica-Bold", fontSize=8, textColor="#ff4b4b", alignment=1, spaceAfter=2
@@ -203,7 +213,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             fontName="Helvetica-Bold", fontSize=9, spaceAfter=4
         )
 
-        # حساب التناسب الديناميكي للحجم لضمان احتواء الترجمة بالكامل في نفس حجم الصفحة الأصلية
+        # ضبط حجم الخط آلياً بناءً على عدد الحروف لمنع تجاوز أبعاد الصفحة
         char_count = len(translated_text)
         f_size = 6 if char_count > 1500 else (7 if char_count > 800 else 8)
         leading = f_size + 2
@@ -229,11 +239,11 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
         doc_temp.build(story)
         buffer.seek(0)
 
-        # إنشاء الصفحة المقسومة بأبعاد دقيقة جداً: (العرض الأصلي * 2، الارتفاع الأصلي)
+        # دمج النصفين Side-by-Side بنفس الحجم الدقيق (العرض * 2، الارتفاع الأصلي)
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # 1. إدراج الصفحة/الشريحة الأصلية في الجهة اليسرى
+        # اليسار: الصورة/الشريحة الأصلية
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -241,7 +251,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
             stream=img_byte_arr.getvalue()
         )
 
-        # 2. إدراج النصف المترجم بنفس الأبعاد 100% في الجهة اليمنى
+        # اليمين: الترجمة مع العلامة المائية
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
@@ -262,7 +272,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func):
 
 
 # ----------------------------------------------------
-# 4. الواجهة الرئيسية
+# 4. الواجهة الرئيسية والتفاعلية
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
