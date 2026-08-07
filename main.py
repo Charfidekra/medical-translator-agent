@@ -9,6 +9,7 @@ import os
 from litellm import completion
 from terminology_db import query_relevant_terms
 
+
 def translate_document(text: str) -> str:
     # التاكد من وجود نص حقيقي
     if not text or len(text.strip()) < 3:
