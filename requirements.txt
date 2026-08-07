@@ -10,3 +10,4 @@ reportlab
 litellm
 chromadb
 pysqlite3-binary
+python-dotenv
