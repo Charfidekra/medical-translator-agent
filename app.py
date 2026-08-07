@@ -1,5 +1,4 @@
-
- import io
+import io
 import fitz  # PyMuPDF
 import easyocr
 import numpy as np
