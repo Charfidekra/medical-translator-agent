@@ -2,8 +2,10 @@ import io
 import gc
 import os
 import shutil
+import concurrent.futures
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageEnhance, ImageOps
 from pptx import Presentation
 
@@ -39,11 +41,10 @@ from main import translate_document
 
 
 # ----------------------------------------------------
-# 0. تهيئة محرك EasyOCR بأمان ومشاركته في الكاش
+# 0. تهيئة محرك EasyOCR بأمان
 # ----------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def load_easyocr_reader():
-    """تحميل EasyOCR عند الحاجة فقط دون إسقاط التطبيق"""
     if easyocr is not None:
         try:
             return easyocr.Reader(['fr', 'en'], gpu=False)
@@ -53,26 +54,104 @@ def load_easyocr_reader():
 
 
 # ----------------------------------------------------
-# 1. تنقية الصور واستخراج النصوص المتقدم
+# 1. واجهة الأذكار والتسبيحات التفاعلية
+# ----------------------------------------------------
+AZKAR_HTML = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>
+  body {
+    background-color: #0e1117;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    margin: 0;
+  }
+  .card {
+    background: #1e2530;
+    border: 1px solid #313d4f;
+    border-radius: 12px;
+    padding: 15px;
+    width: 95%;
+    max-width: 500px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+  .title {
+    color: #00e676;
+    font-size: 15px;
+    margin-bottom: 10px;
+    font-weight: bold;
+  }
+  .zikr {
+    font-size: 19px;
+    color: #ffffff;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.4;
+    margin-bottom: 8px;
+  }
+  .sub {
+    font-size: 11px;
+    color: #8b9bb4;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">✨ جاري معالجة المستند واستخراج النصوص بسرعة... استغل الوقت بالذكر</div>
+    <div class="zikr" id="zikr-box">سُبْحَانَ اللَّهِ وَبِحَمْدِهِ ، سُبْحَانَ اللَّهِ الْعَظِيمِ</div>
+    <div class="sub">يتغيّر الذكر تلقائياً كل بضع ثوانٍ</div>
+  </div>
+
+<script>
+  const azkar = [
+    "سُبْحَانَ اللَّهِ وَبِحَمْدِهِ ، سُبْحَانَ اللَّهِ الْعَظِيمِ",
+    "أَسْتَغْفِرُ اللَّهَ الْعَظِيمَ وَأَتُوبُ إِلَيْهِ",
+    "لا حَوْلَ وَلا قُوَّةَ إِلاَّ بِاللَّهِ الْعَلِيِّ الْعَظِيمِ",
+    "اللَّهُمَّ صَلِّ وَسَلِّمْ وَبَارِكْ عَلَى نَبِيِّنَا مُحَمَّدٍ",
+    "لا إِلَهَ إِلاَّ أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ",
+    "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ",
+    "سُبْحَانَ اللَّهِ ، وَالْحَمْدُ لِلَّهِ ، وَلا إِلَهَ إِلاَّ اللَّهُ ، وَاللَّهُ أَكْبَرُ"
+  ];
+  let idx = 0;
+  setInterval(() => {
+    idx = (idx + 1) % azkar.length;
+    document.getElementById("zikr-box").innerText = azkar[idx];
+  }, 3000);
+</script>
+</body>
+</html>
+"""
+
+
+# ----------------------------------------------------
+# 2. تحسين معالجة الصور وOCR
 # ----------------------------------------------------
 def clean_and_enhance_image(img_pil: Image.Image):
-    """تحسين تباين الصورة وتنظيف العلامات المائية"""
     if cv2 is not None:
         open_cv_image = np.array(img_pil.convert('RGB')) 
         gray = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         return clahe.apply(gray)
     else:
         gray = ImageOps.grayscale(img_pil)
         enhancer = ImageEnhance.Contrast(gray)
-        return enhancer.enhance(2.0)
+        return enhancer.enhance(1.8)
 
 
 def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
-    """محاولة الاستخراج متعددة المستويات (EasyOCR -> Tesseract)"""
     extracted_text = ""
     
-    # 1. التجربة الأولى: عبر EasyOCR
+    # 1. التجربة عبر EasyOCR
     reader = load_easyocr_reader()
     if reader is not None:
         try:
@@ -82,7 +161,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
         except Exception:
             extracted_text = ""
 
-    # 2. التجربة الثانية: التراجع إلى Tesseract إذا فشل EasyOCR
+    # 2. التجربة عبر Tesseract
     if not extracted_text and pytesseract is not None:
         try:
             processed_img = clean_and_enhance_image(img_pil)
@@ -97,7 +176,7 @@ def process_deep_ocr(img_pil: Image.Image, translator_func) -> str:
 
 
 # ----------------------------------------------------
-# 2. استخراج الصفحات وبناء Side-by-Side PDF
+# 3. استخراج واستخراج سريع وموازي
 # ----------------------------------------------------
 def extract_pages_from_file(uploaded_file):
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -110,8 +189,8 @@ def extract_pages_from_file(uploaded_file):
             page = doc[page_num]
             text = page.get_text("text").strip()
             
-            # تقليل DPI إلى 150 لتجنب استهلاك الذاكرة وتجميد التطبيق
-            pix = page.get_pixmap(dpi=150)
+            # خفض DPI إلى 120 لسرعة خيالية وتقليل الحجم
+            pix = page.get_pixmap(dpi=120)
             img_pil = Image.open(io.BytesIO(pix.tobytes("png")))
             w, h = page.rect.width, page.rect.height
             pages_data.append((page_num, text, img_pil, w, h))
@@ -129,38 +208,47 @@ def extract_pages_from_file(uploaded_file):
                         if paragraph.text.strip():
                             text_runs.append(paragraph.text.strip())
             full_text = "\n".join(text_runs).strip()
-            
-            # إنشاء خلفية للصورة في PPTX
             img_pil = Image.new('RGB', (int(w), int(h)), color=(245, 247, 250))
             pages_data.append((idx, full_text, img_pil, w, h))
 
     return pages_data
 
 
-def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
+def process_single_page(page_info, translator_func):
+    p_num, text, img_pil, w, h = page_info
+    if text and len(text) >= 10:
+        translated_text = translator_func(text)
+    else:
+        translated_text = process_deep_ocr(img_pil, translator_func)
+    return (p_num, translated_text, img_pil, w, h)
+
+
+def generate_side_by_side_pdf_fast(uploaded_file, translator_func):
     pages_raw = extract_pages_from_file(uploaded_file)
     total_pages = len(pages_raw)
 
     progress_bar = st.progress(0)
-    results = []
+    status_text = st.empty()
+    status_text.text("⚡ جاري تسريع معالجة الترجمة للصفحات...")
 
-    for completed, (p_num, text, img_pil, w, h) in enumerate(pages_raw, start=1):
-        status_box.update(label=f"⚡ جاري ترجمة الصفحة {completed} من أصل {total_pages}...", state="running")
-        
-        # 1. الاستخراج المباشر للنص الرقمي
-        try:
-            if text and len(text) >= 10:
-                translated_text = translator_func(text)
-            else:
-                # 2. الاستخراج العميق عبر OCR للصورة
-                translated_text = process_deep_ocr(img_pil, translator_func)
-        except Exception as err:
-            translated_text = f"[فشلت ترجمة هذه الصفحة: {str(err)}]"
+    # معالجة موازية (Multithreading) لجميع الصفحات لزيادة السرعة
+    results = [None] * total_pages
+    completed_count = 0
 
-        results.append((p_num, translated_text, img_pil, w, h))
-        progress_bar.progress(completed / total_pages)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_page = {executor.submit(process_single_page, page_data, translator_func): idx for idx, page_data in enumerate(pages_raw)}
+        for future in concurrent.futures.as_completed(future_to_page):
+            idx = future_to_page[future]
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                results[idx] = (idx, f"[حدث خطأ في الصفحة: {str(e)}]", pages_raw[idx][2], pages_raw[idx][3], pages_raw[idx][4])
+            
+            completed_count += 1
+            progress_bar.progress(completed_count / total_pages)
+            status_text.text(f"⚡ تم إنهاء ترجمة {completed_count} من أصل {total_pages} صفحات...")
 
-    status_box.update(label="🎨 جاري إنشاء ملف PDF المقسوم وتطبيق العلامة المائية...", state="running")
+    status_text.text("🎨 جاري رصف الصفحات المترجمة والنسخة الأصلية بمتوازيات بنفس الحجم...")
 
     new_doc = fitz.open()
     all_translated_texts = []
@@ -168,11 +256,12 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
     for page_num, translated_text, final_img_pil, orig_w, orig_h in results:
         all_translated_texts.append(f"--- Page/Slide {page_num + 1} ---\n{translated_text}")
 
+        # بناء الصفحة المترجمة بحجم مطابق تماماً للصفحة الأصلية
         buffer = io.BytesIO()
         doc_temp = SimpleDocTemplate(
             buffer,
             pagesize=(orig_w, orig_h),
-            rightMargin=15, leftMargin=15, topMargin=15, bottomMargin=15,
+            rightMargin=12, leftMargin=12, topMargin=12, bottomMargin=12,
         )
 
         styles = getSampleStyleSheet()
@@ -210,10 +299,11 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
         doc_temp.build(story)
         buffer.seek(0)
 
+        # مضاعفة العرض بنسبة 50% / 50% لليمين واليسار متطابقين تماماً
         total_width = orig_w * 2
         combo_page = new_doc.new_page(width=total_width, height=orig_h)
 
-        # الصفحة الأصلية (يسار)
+        # الجزء الأيسر: النص/الصورة الأصلية (50% من المساحة)
         img_byte_arr = io.BytesIO()
         final_img_pil.save(img_byte_arr, format="PNG")
         combo_page.insert_image(
@@ -221,15 +311,12 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
             stream=img_byte_arr.getvalue()
         )
 
-        # النص المترجم (يمين)
+        # الجزء الأيمن: النص المترجم الموازي بنفس المقاس بالضبط (50% من المساحة)
         translated_pdf_doc = fitz.open(stream=buffer.getvalue(), filetype="pdf")
         combo_page.show_pdf_page(
             fitz.Rect(orig_w, 0, total_width, orig_h),
             translated_pdf_doc, 0
         )
-        
-        # تنظيف الصور المفتوحة من الذاكرة العشوائية فوراً
-        final_img_pil.close()
         gc.collect()
 
     output_buffer = io.BytesIO()
@@ -237,6 +324,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
     new_doc.close()
 
     progress_bar.empty()
+    status_text.empty()
 
     output_buffer.seek(0)
     full_text_combined = "\n\n".join(all_translated_texts)
@@ -244,7 +332,7 @@ def generate_side_by_side_pdf_safe(uploaded_file, translator_func, status_box):
 
 
 # ----------------------------------------------------
-# 3. واجهة Streamlit الرئيسية
+# 4. واجهة Streamlit الرئيسية
 # ----------------------------------------------------
 st.set_page_config(page_title="MEDICAL TRANSLATOR AGENT", page_icon="🩺", layout="wide")
 
@@ -281,22 +369,36 @@ with tab_file:
         st.success("تم استلام الملف بنجاح!")
 
         if st.button("ترجمة المستند وتوليد PDF المقسوم", key="btn_translate_file"):
-            with st.status("🚀 جاري معالجة المستند واستخراج النصوص...", expanded=True) as status:
-                try:
-                    final_pdf_bytes, combined_text = generate_side_by_side_pdf_safe(
-                        uploaded_file, translate_document, status
-                    )
-                    status.update(label="🎉 اكتملت المعالجة والترجمة بنجاح!", state="complete", expanded=False)
-                    st.toast("تمت الترجمة بنجاح!", icon="🎉")
+            # عرض الأذكار بوضوح أثناء المعالجة
+            azkar_container = st.empty()
+            with azkar_container.container():
+                components.html(AZKAR_HTML, height=180)
 
-                    st.text_area(label="معاينة النص المترجم والمصحح:", value=combined_text, height=250)
+            try:
+                final_pdf_bytes, combined_text = generate_side_by_side_pdf_fast(
+                    uploaded_file, translate_document
+                )
+                
+                # تفريغ الأذكار فور انتهاء المعالجة
+                azkar_container.empty()
+                st.balloons()
+                st.success("🎉 اكتملت المعالجة والترجمة بنجاح!")
 
-                    st.download_button(
-                        label="📥 تحميل الملف المترجم المقسوم (PDF) - BY CHARFI DEKRA",
-                        data=final_pdf_bytes,
-                        file_name=f"translated_BY_CHARFI_DEKRA_{uploaded_file.name.split('.')[0]}.pdf",
-                        mime="application/pdf",
-                    )
-                except Exception as e:
-                    status.update(label="❌ حدث خطأ أثناء المعالجة", state="error", expanded=True)
-                    st.error(f"تفاصيل الخطأ: {e}")
+                # عرض زر التحميل وقراءة النص مباشرة
+                st.markdown("### 📥 نتائج الترجمة والملف المترجم:")
+                
+                st.download_button(
+                    label="📥 اضغط هنا لتحميل الملف المترجم المقسوم (Side-By-Side PDF) - BY CHARFI DEKRA",
+                    data=final_pdf_bytes,
+                    file_name=f"translated_BY_CHARFI_DEKRA_{uploaded_file.name.split('.')[0]}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+
+                st.markdown("---")
+                st.subheader("📖 لقراءة النص المترجم والمكافئ كاملاً:")
+                st.text_area(label="النص المترجم والمصحح كاملاً:", value=combined_text, height=350)
+
+            except Exception as e:
+                azkar_container.empty()
+                st.error(f"حدث خطأ أثناء المعالجة: {e}")
