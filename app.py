@@ -12,7 +12,7 @@ user_key = st.sidebar.text_input(
     "مفتاح Groq API Key:", 
     type="password", 
     key="groq_key_input",
-    help="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"
+    help="AQ.Ab8RN6L8uTxtW5zhV2DVlvXEgtgjIi5w-x01_Mgsqtml1gQptQ"
 )
 # ----------------------------------------------------
 # الاستيرادات مع معالجة الاستثناءات الآمنة
