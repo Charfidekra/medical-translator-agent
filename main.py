@@ -3,13 +3,10 @@ import streamlit as st
 from litellm import completion
 
 def get_groq_api_key():
-    # 1. من st.secrets
     if "GROQ_API_KEY" in st.secrets and st.secrets["GROQ_API_KEY"]:
         return st.secrets["GROQ_API_KEY"].strip()
-    # 2. من متغيرات البيئة
     if os.environ.get("GROQ_API_KEY"):
         return os.environ.get("GROQ_API_KEY").strip()
-    # 3. من الشريط الجانبي في التطبيق
     if "groq_key_input" in st.session_state and st.session_state["groq_key_input"]:
         return st.session_state["groq_key_input"].strip()
     return None
@@ -31,11 +28,10 @@ def translate_document(text: str) -> str:
         "IMPORTANT: Output ONLY the direct English translation. Do NOT output system warnings or intro phrases."
     )
 
-    # تجربة النماذج بطلب مباشر من Groq
+    # قائمة النماذج المعتمدة والنشطة حالياً على Groq
     models_to_try = [
         "groq/llama-3.3-70b-versatile",
-        "groq/llama3-8b-8192",
-        "groq/mixtral-8x7b-32768"
+        "groq/llama-3.1-8b-instant"
     ]
 
     last_error = ""
