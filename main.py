@@ -14,9 +14,9 @@ def translate_document(text: str) -> str:
     )
 
     try:
-        # استخدام اسم النموذج المعتمد رسمياً لدى Groq عبر LiteLLM
+        # استخدام نموذج Llama 3.3 الأساسي والمعتمد حالياً على Groq
         response = completion(
-            model="groq/llama3-70b-8192",  # تم تحديث الاسم هنا
+            model="groq/llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text}
@@ -25,10 +25,10 @@ def translate_document(text: str) -> str:
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        # في حال حدوث خطأ يتم تجربة نموذج llama3-8b السريع كبديل احتياطي
+        # في حال حدوث أي ضغط أو خطأ يتم التراجع تلقائياً إلى Llama 3.1 8B السريع
         try:
             response = completion(
-                model="groq/llama3-8b-8192",
+                model="groq/llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text}
