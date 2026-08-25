@@ -7,7 +7,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageEnhance, ImageOps
 from pptx import Presentation
-
+st.sidebar.title("⚙️ الإعدادات")
+user_key = st.sidebar.text_input(
+    "مفتاح Groq API Key:", 
+    type="password", 
+    key="groq_key_input",
+    help="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"
+)
 # ----------------------------------------------------
 # الاستيرادات مع معالجة الاستثناءات الآمنة
 # ----------------------------------------------------
