@@ -26,7 +26,7 @@ def translate_document(text: str) -> str:
         "IMPORTANT: Output ONLY the direct English translation. Do NOT output system warnings or intro phrases."
     )
 
-    models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+    models_to_try = ['gemini-3.5-flash', 'gemini-3.5-flash-lite']
     client = genai.Client(api_key=api_key)
     last_error = ""
 
