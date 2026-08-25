@@ -2,25 +2,22 @@ import os
 import streamlit as st
 from google import genai
 
-# 🔑 ضعي مفتاح Gemini الخاص بك هنا (يبدأ بـ AIzaSy...)
-GEMINI_API_KEY = "AQ.Ab8RN6L8uTxtW5zhV2DVlvXEgtgjIi5w-x01_Mgsqtml1gQptQ"
-
 def translate_document(text: str) -> str:
     if not text or len(text.strip()) < 3:
         return "[لا يوجد نص قابل للترجمة في هذه الصفحة]"
 
-    api_key = GEMINI_API_KEY.strip()
+    # المفتاح ياخذوه فقط من Streamlit Secrets — ماكيبقاش مكتوب فالكود
+    api_key = ""
+    try:
+        api_key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+    except Exception:
+        pass
 
-    # محاولة جلب المفتاح من Secrets إذا لم يكن مكتوباً أعلاه
-    if api_key.startswith("AIzaSy_ضع"):
-        try:
-            if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
-                api_key = str(st.secrets["GEMINI_API_KEY"]).strip()
-        except Exception:
-            pass
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
-    if not api_key or api_key.startswith("AIzaSy_ضع"):
-        return "[⚠️ يرجى وضع مفتاح Google Gemini في متغير GEMINI_API_KEY داخل main.py]"
+    if not api_key:
+        return "[⚠️ يرجى إضافة GEMINI_API_KEY في Streamlit Secrets]"
 
     system_prompt = (
         "You are an expert medical translator and population geneticist. "
@@ -29,9 +26,7 @@ def translate_document(text: str) -> str:
         "IMPORTANT: Output ONLY the direct English translation. Do NOT output system warnings or intro phrases."
     )
 
-    # النماذج المعتمدة والرسمية من Google
-       models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
-
+    models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
     client = genai.Client(api_key=api_key)
     last_error = ""
 
@@ -43,7 +38,11 @@ def translate_document(text: str) -> str:
             )
             return response.text.strip()
         except Exception as e:
-            last_error = str(e)
+            err_str = str(e)
+            last_error = err_str
+            # إذا كان quota/rate-limit، مافيش فايدة نجربو موديل آخر بنفس المفتاح
+            if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
+                return f"[⚠️ تجاوزتِ الحد المسموح من الطلبات (rate limit) — انتظري شوية وعاودي المحاولة: {err_str}]"
             continue
 
     return f"[خطأ في الترجمة: {last_error}]"
