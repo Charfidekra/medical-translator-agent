@@ -1,5 +1,11 @@
 import os
 from litellm import completion
+import streamlit as st
+from litellm import completion
+
+# جلب المفتاح من secrets الخاصة بـ Streamlit أو من بيئة النظام
+if "GROQ_API_KEY" in st.secrets:
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
 def translate_document(text: str) -> str:
     # التأكد من وجود نص حقيقي
