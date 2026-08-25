@@ -6,7 +6,7 @@ numpy
 Pillow
 pytesseract
 reportlab
-groq
+google-genai
 chromadb
 pysqlite3-binary
 python-dotenv
