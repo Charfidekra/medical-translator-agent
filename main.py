@@ -30,10 +30,7 @@ def translate_document(text: str) -> str:
     )
 
     # النماذج المعتمدة والرسمية من Google
-    models_to_try = [
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
-    ]
+       models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
     client = genai.Client(api_key=api_key)
     last_error = ""
