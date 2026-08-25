@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from litellm import completion
 
+GROQ_KEY = "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"
 def translate_document(text: str) -> str:
     if not text or len(text.strip()) < 3:
         return "[لا يوجد نص قابل للترجمة في هذه الصفحة]"
