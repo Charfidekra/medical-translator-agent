@@ -9,9 +9,9 @@ from PIL import Image, ImageEnhance, ImageOps
 from pptx import Presentation
 st.sidebar.title("⚙️ الإعدادات")
 user_key = st.sidebar.text_input(
-    "مفتاح Groq API Key:", 
+    "مفتاح gemini API Key:", 
     type="password", 
-    key="groq_key_input",
+    key="gemini_key_input",
     help="AQ.Ab8RN6L8uTxtW5zhV2DVlvXEgtgjIi5w-x01_Mgsqtml1gQptQ"
 )
 # ----------------------------------------------------
