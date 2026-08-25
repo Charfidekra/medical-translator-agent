@@ -2,7 +2,7 @@ import os
 from groq import Groq
 
 # 🔑 حطي مفتاحك هنا مباشرة بين القوسين
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "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"
 
 def translate_document(text: str) -> str:
     if not text or len(text.strip()) < 3:
