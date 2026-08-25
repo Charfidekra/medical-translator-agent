@@ -3,13 +3,13 @@ import streamlit as st
 from groq import Groq
 
 def get_groq_api_key():
-    # 1. جلب المفتاح من secrets
+    # 1. جلب المفتاح من Secrets
     if "GROQ_API_KEY" in st.secrets and st.secrets["GROQ_API_KEY"]:
         return st.secrets["GROQ_API_KEY"].strip()
     # 2. جلب المفتاح من بيئة النظام
     if os.environ.get("GROQ_API_KEY"):
         return os.environ.get("GROQ_API_KEY").strip()
-    # 3. جلب المفتاح من الشريط الجانبي في Streamlit
+    # 3. جلب المفتاح من الشريط الجانبي
     if "groq_key_input" in st.session_state and st.session_state["groq_key_input"]:
         return st.session_state["groq_key_input"].strip()
     return None
@@ -20,7 +20,7 @@ def translate_document(text: str) -> str:
 
     api_key = get_groq_api_key()
     if not api_key:
-        return "[⚠️ يرجى إدخال مفتاح Groq API Key الصحيح في الشريط الجانبي أولاً]"
+        return "[⚠️ يرجى إدخال مفتاح Groq API Key الصحيح في الشريط الجانبي أو في Secrets أولاً]"
 
     system_prompt = (
         "You are an expert medical translator and population geneticist. "
@@ -30,7 +30,7 @@ def translate_document(text: str) -> str:
     )
 
     try:
-        # الاتصال المباشر بمكتبة Groq الرسمية بدون وسائط litellm
+        # استخدام مكتبة Groq الرسمية مباشرة
         client = Groq(api_key=api_key)
         
         response = client.chat.completions.create(
@@ -44,17 +44,4 @@ def translate_document(text: str) -> str:
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        # المحاولة باستخدام النموذج الخفيف السريع في حال التحتّم
-        try:
-            client = Groq(api_key=api_key)
-            response = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text}
-                ],
-                model="llama-3.1-8b-instant",
-                temperature=0.1,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as err:
-            return f"[خطأ من Groq: {str(err)}]"
+        return f"[خطأ من Groq: {str(e)}]"
